@@ -1,10 +1,4 @@
-import {
-  apiRequest,
-  clearAccessToken,
-  getAccessToken,
-  initializeDatabase,
-  storeAccessToken,
-} from "./api";
+import { apiRequest, clearAccessToken, getAccessToken, storeAccessToken } from "./api";
 
 export type Role = "student" | "staff" | "admin";
 
@@ -39,11 +33,18 @@ const sessionKey = "plmun-bc-user";
 
 export const authProvider: AuthProvider = {
   async signIn(credentials) {
-    await initializeDatabase();
-    const result = await apiRequest<{ user: AuthUser; accessToken: string }>("/auth/login", {
-      method: "POST",
-      body: JSON.stringify(credentials),
-    });
+    const preset = demoAccounts.find(
+      (account) =>
+        account.email.toLowerCase() === credentials.email.trim().toLowerCase() &&
+        account.password === credentials.password,
+    );
+    const result = await apiRequest<{ user: AuthUser; accessToken: string }>(
+      preset ? "/auth/demo-login" : "/auth/login",
+      {
+        method: "POST",
+        body: JSON.stringify(preset ? { role: preset.role } : credentials),
+      },
+    );
     storeAccessToken(result.accessToken);
     window.localStorage.setItem(sessionKey, JSON.stringify(result.user));
     return result.user;

@@ -175,6 +175,56 @@ app.post(`${prefix}/auth/login`, async (c) => {
   });
 });
 
+app.post(`${prefix}/auth/demo-login`, async (c) => {
+  const { role } = await c.req.json();
+  const account = presetAccounts.find((preset) => preset.metadata.role === role);
+  if (!account) return c.json({ error: "This demo account is not available." }, 404);
+
+  try {
+    const client = adminClient();
+    const { data: listed, error: listError } = await client.auth.admin.listUsers({
+      page: 1,
+      perPage: 1000,
+    });
+    if (listError) throw listError;
+
+    const existing = listed.users.find((user) => user.email === account.email);
+    if (existing) {
+      const { error } = await client.auth.admin.updateUserById(existing.id, {
+        password: account.password,
+        email_confirm: true,
+        user_metadata: account.metadata,
+      });
+      if (error) throw error;
+    } else {
+      const { error } = await client.auth.admin.createUser({
+        email: account.email,
+        password: account.password,
+        email_confirm: true,
+        user_metadata: account.metadata,
+      });
+      if (error) throw error;
+    }
+
+    if (!(await kv.get("products"))) await kv.set("products", initialProducts);
+
+    const { data, error } = await publicClient().auth.signInWithPassword({
+      email: account.email,
+      password: account.password,
+    });
+    if (error || !data.user || !data.session) throw error ?? new Error("Demo sign-in failed.");
+
+    return c.json({
+      user: toUser(data.user),
+      accessToken: data.session.access_token,
+      refreshToken: data.session.refresh_token,
+    });
+  } catch (error) {
+    console.log("Demo account error:", error);
+    return c.json({ error: "The demo account could not be prepared. Please try again." }, 500);
+  }
+});
+
 app.post(`${prefix}/auth/register`, async (c) => {
   const { name, reference, email, password } = await c.req.json();
   const cleanName = String(name ?? "").trim();

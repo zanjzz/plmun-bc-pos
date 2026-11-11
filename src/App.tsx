@@ -1,4 +1,31 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import {
+  ArrowRight,
+  BarChart3,
+  Boxes,
+  CheckCircle2,
+  ClipboardList,
+  Clock3,
+  FileText,
+  History,
+  Home,
+  LayoutDashboard,
+  LogOut,
+  Mail,
+  MapPin,
+  Menu,
+  Package,
+  Printer,
+  ScanLine,
+  Search,
+  ShieldCheck,
+  ShoppingBag,
+  ShoppingCart,
+  Sparkles,
+  Store,
+  Users,
+  type LucideIcon,
+} from "lucide-react";
 import { type AuthUser, authProvider, readStoredSession, type Role } from "./auth";
 import Login from "./Login";
 import {
@@ -84,19 +111,33 @@ const navByRole: Record<Role, string[]> = {
   ],
 };
 
+const navIcons: Record<string, LucideIcon> = {
+  Home,
+  Products: Package,
+  Services: Printer,
+  "My orders": ClipboardList,
+  Dashboard: LayoutDashboard,
+  "POS terminal": ScanLine,
+  "Order management": ClipboardList,
+  "Product management": Package,
+  "Inventory management": Boxes,
+  "Sales reports": BarChart3,
+  "Inventory reports": FileText,
+  "Transaction history": History,
+  "User management": Users,
+};
+
 const peso = (value: number) => `₱${value.toFixed(2)}`;
 
 function Mark() {
   return (
     <div className="flex items-center gap-2.5">
-      <span className="grid size-9 place-items-center rounded-full bg-[#184d37] text-sm font-bold text-white shadow-sm">
-        P
-      </span>
+      <img src="/assets/plmun-logo.png" alt="PLMun seal" className="size-10 object-contain" />
       <div className="leading-none">
-        <div className="text-[13px] font-bold tracking-[.14em] text-[#163e30]">PLMUN BC</div>
-        <div className="mt-1 text-[9px] uppercase tracking-[.18em] text-[#7e877c]">
-          Business Center
+        <div className="text-[12px] font-bold tracking-[.08em] text-[#163e30]">
+          PLMUN BUSINESS CENTER
         </div>
+        <div className="mt-1 text-[9px] tracking-wide text-[#7e877c]">Campus services</div>
       </div>
     </div>
   );
@@ -171,7 +212,7 @@ function Header({
   const role = user.role;
   const [mobileOpen, setMobileOpen] = useState(false);
   return (
-    <header className="sticky top-0 z-30 border-b border-[#dfe1d8] bg-[#fbfcf7]/95 backdrop-blur">
+    <header className="sticky top-0 z-30 border-b border-[#dfe1d8]/80 bg-[#fbfcf7]/90 shadow-[0_1px_12px_rgba(28,61,45,.04)] backdrop-blur-xl">
       <div className="mx-auto flex h-[72px] max-w-[1500px] items-center gap-7 px-4 sm:px-7">
         <button
           onClick={() => setPage(role === "student" ? "Home" : "Dashboard")}
@@ -185,7 +226,7 @@ function Header({
               <button
                 key={item}
                 onClick={() => setPage(item)}
-                className={`h-full border-b-2 px-3 text-xs font-semibold ${page === item ? "border-[#184d37] text-[#184d37]" : "border-transparent text-[#687168] hover:text-[#184d37]"}`}
+                className={`h-full border-b-2 px-3 text-xs font-semibold transition-colors ${page === item ? "border-[#184d37] text-[#184d37]" : "border-transparent text-[#687168] hover:text-[#184d37]"}`}
               >
                 {item}
               </button>
@@ -193,7 +234,10 @@ function Header({
           </nav>
         )}
         <label className="relative ml-auto hidden w-full max-w-[350px] md:block">
-          <span className="absolute left-3 top-2.5 text-[#8d958b]">⌕</span>
+          <Search
+            size={15}
+            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#8d958b]"
+          />
           <input
             onFocus={() => setPage(role === "student" ? "Products" : page)}
             className="w-full rounded-md border border-[#dfe3da] bg-white py-2.5 pl-9 pr-3 text-xs outline-none focus:border-[#184d37]"
@@ -203,10 +247,10 @@ function Header({
         {role === "student" && (
           <button
             onClick={() => setPage("Cart")}
-            className="relative rounded-md px-2 py-2 text-xs font-semibold text-[#374c42] hover:bg-[#edf0e8]"
+            className="relative flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold text-[#374c42] transition hover:bg-[#edf0e8]"
           >
-            Cart{" "}
-            <span className="ml-1 rounded-full bg-[#184d37] px-1.5 py-0.5 text-[9px] text-white">
+            <ShoppingBag size={16} /> <span className="hidden sm:inline">Cart</span>
+            <span className="rounded-full bg-[#184d37] px-1.5 py-0.5 text-[9px] text-white">
               {cartCount}
             </span>
           </button>
@@ -217,37 +261,42 @@ function Header({
         </div>
         <button
           onClick={onSignOut}
-          className="hidden rounded-md border border-[#d8ddd4] px-3 py-2 text-[10px] font-semibold text-[#486056] hover:border-[#184d37] sm:block"
+          className="hidden items-center gap-1.5 rounded-lg border border-[#d8ddd4] px-3 py-2 text-[10px] font-semibold text-[#486056] transition hover:border-[#184d37] hover:bg-white sm:flex"
         >
-          Sign out
+          <LogOut size={13} /> Sign out
         </button>
         <button
           onClick={() => setMobileOpen(!mobileOpen)}
-          className="rounded-md border border-[#d8ddd4] p-2 text-xs lg:hidden"
+          className="rounded-lg border border-[#d8ddd4] p-2.5 text-[#375446] lg:hidden"
           aria-label="Open navigation"
         >
-          Menu
+          <Menu size={17} />
         </button>
       </div>
       {mobileOpen && (
         <div className="border-t border-[#e1e4dc] bg-white p-3 lg:hidden">
-          {navByRole[role].map((item) => (
-            <button
-              key={item}
-              onClick={() => {
-                setPage(item);
-                setMobileOpen(false);
-              }}
-              className="block w-full rounded px-3 py-2 text-left text-xs font-semibold hover:bg-[#edf0e8]"
-            >
-              {item}
-            </button>
-          ))}
+          {navByRole[role].map((item) =>
+            (() => {
+              const Icon = navIcons[item] ?? ArrowRight;
+              return (
+                <button
+                  key={item}
+                  onClick={() => {
+                    setPage(item);
+                    setMobileOpen(false);
+                  }}
+                  className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-xs font-semibold hover:bg-[#edf0e8]"
+                >
+                  <Icon size={15} /> {item}
+                </button>
+              );
+            })(),
+          )}
           <button
             onClick={onSignOut}
-            className="mt-2 block w-full rounded border border-[#d8ddd4] px-3 py-2 text-left text-xs font-semibold text-[#6b4a42]"
+            className="mt-2 flex w-full items-center gap-2 rounded-lg border border-[#d8ddd4] px-3 py-2.5 text-left text-xs font-semibold text-[#6b4a42]"
           >
-            Sign out
+            <LogOut size={15} /> Sign out
           </button>
         </div>
       )}
@@ -268,19 +317,24 @@ function Sidebar({
   return (
     <aside className="hidden w-[230px] shrink-0 border-r border-[#dfe1d8] bg-[#f8f9f3] p-4 lg:flex lg:flex-col">
       <div className="space-y-1">
-        {navByRole[role].map((item) => (
-          <button
-            key={item}
-            onClick={() => setPage(item)}
-            className={`w-full rounded-md px-3 py-3 text-left text-xs font-semibold transition ${page === item ? "bg-[#184d37] text-white" : "text-[#57675e] hover:bg-[#e8ece4]"}`}
-          >
-            {item}
-          </button>
-        ))}
+        {navByRole[role].map((item) => {
+          const Icon = navIcons[item] ?? ArrowRight;
+          return (
+            <button
+              key={item}
+              onClick={() => setPage(item)}
+              className={`flex w-full items-center gap-3 rounded-lg px-3 py-3 text-left text-xs font-semibold transition-all duration-300 ${page === item ? "bg-[#184d37] text-white shadow-[0_8px_18px_rgba(24,77,55,.16)]" : "text-[#57675e] hover:translate-x-0.5 hover:bg-[#e8ece4]"}`}
+            >
+              <Icon size={16} strokeWidth={1.8} /> {item}
+            </button>
+          );
+        })}
       </div>
-      <div className="mt-auto rounded-md border border-[#dfe4da] bg-white p-3 text-[10px] leading-5 text-[#707a72]">
-        <div className="font-semibold text-[#274b3a]">PLMun Business Center</div>
-        Service hours: 8:00 AM–5:00 PM
+      <div className="mt-auto rounded-xl border border-[#dfe4da] bg-white p-4 text-[10px] leading-5 text-[#707a72] shadow-sm">
+        <div className="mb-1 flex items-center gap-2 font-semibold text-[#274b3a]">
+          <Clock3 size={14} /> Service hours
+        </div>
+        Monday–Friday, 8:00 AM–5:00 PM
       </div>
     </aside>
   );
@@ -316,7 +370,7 @@ function ProductCard({
   open: (p: Product) => void;
 }) {
   return (
-    <article className="group overflow-hidden rounded-lg border border-[#dfe2d9] bg-white shadow-[0_1px_2px_rgba(30,55,42,.04)] transition hover:-translate-y-0.5 hover:shadow-md">
+    <article className="group overflow-hidden rounded-xl border border-[#dfe2d9] bg-white shadow-[0_2px_8px_rgba(30,55,42,.04)] transition-all duration-300 hover:-translate-y-1 hover:border-[#c8d3c5] hover:shadow-[0_16px_36px_rgba(30,55,42,.1)]">
       <button
         onClick={() => open(product)}
         className="block w-full overflow-hidden bg-[#eeeee6] text-left"
@@ -324,7 +378,7 @@ function ProductCard({
         <img
           src={product.image}
           alt={product.name}
-          className="h-36 w-full object-cover transition duration-500 group-hover:scale-[1.03]"
+          className="h-40 w-full object-cover transition duration-700 group-hover:scale-[1.04]"
         />
       </button>
       <div className="p-4">
@@ -342,8 +396,8 @@ function ProductCard({
           <span className="text-[10px] text-[#899188]">
             {product.stock > 50 ? "In stock" : `${product.stock} available`}
           </span>
-          <Button onClick={() => add(product)} className="px-3 py-2">
-            Add to cart
+          <Button onClick={() => add(product)} className="flex items-center gap-1.5 px-3 py-2">
+            <ShoppingCart size={13} /> Add
           </Button>
         </div>
       </div>
@@ -361,62 +415,155 @@ function StudentHome({
   open: (p: Product) => void;
 }) {
   const { products } = useProductStore();
+  const steps = [
+    {
+      number: "01",
+      title: "Order online",
+      description: "Browse essentials and campus services from any device, whenever you need them.",
+      icon: ShoppingBag,
+      accent: "bg-[#e2ecdf] text-[#184d37]",
+    },
+    {
+      number: "02",
+      title: "We prepare it",
+      description: "Business Center staff prepare every item and update your order in real time.",
+      icon: Sparkles,
+      accent: "bg-[#eeead8] text-[#6c5b22]",
+    },
+    {
+      number: "03",
+      title: "Pick up on campus",
+      description:
+        "Bring your order number to the counter and collect everything in one quick visit.",
+      icon: MapPin,
+      accent: "bg-[#e3e9ed] text-[#345c70]",
+    },
+  ];
   return (
     <>
-      <section className="mb-8 overflow-hidden rounded-xl bg-[#e9eadf]">
-        <div className="grid items-center md:grid-cols-[1.05fr_.95fr]">
-          <div className="p-7 sm:p-10 lg:p-14">
-            <div className="mb-4 text-[10px] font-bold uppercase tracking-[.22em] text-[#557063]">
-              PLMun Business Center
+      <section className="animate-enter relative mb-12 overflow-hidden rounded-[24px] border border-white/60 bg-[#e7eadf] shadow-[0_20px_50px_rgba(31,62,46,.08)]">
+        <div className="pointer-events-none absolute -left-20 -top-20 size-64 rounded-full bg-white/45 blur-3xl" />
+        <div className="grid items-stretch lg:grid-cols-[1.08fr_.92fr]">
+          <div className="relative p-7 sm:p-11 lg:p-14 xl:p-16">
+            <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-[#bfcdbb] bg-white/45 px-3 py-2 text-[10px] font-bold uppercase tracking-[.18em] text-[#426353]">
+              <Sparkles size={13} /> Campus essentials, simplified
             </div>
-            <h1 className="max-w-xl text-4xl font-semibold leading-[1.08] tracking-[-.045em] text-[#143b2d] sm:text-5xl">
+            <h1 className="max-w-2xl text-4xl font-semibold leading-[1.06] tracking-[-.05em] text-[#143b2d] sm:text-5xl xl:text-[56px]">
               Everything you need for a productive school day.
             </h1>
-            <p className="mt-5 max-w-lg text-sm leading-6 text-[#657068]">
+            <p className="mt-6 max-w-xl text-sm leading-7 text-[#657068]">
               Shop school essentials, request printing services, and pick up your order on
               campus—without the long wait.
             </p>
-            <div className="mt-7 flex gap-3">
-              <Button onClick={() => setPage("Products")}>Browse products</Button>
-              <Button kind="secondary" onClick={() => setPage("Services")}>
-                View services
+            <div className="mt-8 flex flex-wrap gap-3">
+              <Button
+                onClick={() => setPage("Products")}
+                className="group flex items-center gap-2 px-5 py-3"
+              >
+                Browse products
+                <ArrowRight size={14} className="transition group-hover:translate-x-0.5" />
+              </Button>
+              <Button
+                kind="secondary"
+                onClick={() => setPage("Services")}
+                className="flex items-center gap-2 px-5 py-3"
+              >
+                <Printer size={14} /> View services
               </Button>
             </div>
+            <div className="mt-10 flex flex-wrap gap-x-7 gap-y-3 text-[10px] font-medium text-[#647269]">
+              <span className="flex items-center gap-1.5">
+                <CheckCircle2 size={14} className="text-[#3c765b]" /> Campus pickup
+              </span>
+              <span className="flex items-center gap-1.5">
+                <Clock3 size={14} className="text-[#3c765b]" /> Live order updates
+              </span>
+              <span className="flex items-center gap-1.5">
+                <ShieldCheck size={14} className="text-[#3c765b]" /> Secure student access
+              </span>
+            </div>
           </div>
-          <img
-            src="/assets/stationery.jpg"
-            alt="Notebook and pen on a desk"
-            className="min-h-[290px] h-full w-full object-cover"
-          />
+          <div className="relative hidden min-h-[440px] overflow-hidden lg:block">
+            <img
+              src="/assets/stationery.jpg"
+              alt="Notebook and pen on a desk"
+              className="absolute inset-0 h-full w-full object-cover transition duration-1000 hover:scale-[1.02]"
+            />
+            <div className="absolute inset-0 bg-gradient-to-r from-[#e7eadf]/35 to-transparent" />
+            <div className="absolute bottom-6 left-6 rounded-xl border border-white/50 bg-white/80 p-4 shadow-lg backdrop-blur">
+              <div className="flex items-center gap-3">
+                <span className="grid size-9 place-items-center rounded-lg bg-[#184d37] text-white">
+                  <Store size={17} />
+                </span>
+                <div>
+                  <div className="text-xs font-semibold text-[#183e30]">Open today</div>
+                  <div className="mt-0.5 text-[10px] text-[#718078]">8:00 AM — 5:00 PM</div>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </section>
-      <SectionTitle
-        title="Featured products"
-        subtitle="Student favorites, ready for campus pickup."
-        action={
-          <Button kind="ghost" onClick={() => setPage("Products")}>
-            View all products
-          </Button>
-        }
-      />
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {products.slice(0, 4).map((p) => (
-          <ProductCard key={p.id} product={p} add={add} open={open} />
-        ))}
-      </div>
-      <div className="mt-9 grid gap-4 md:grid-cols-3">
-        {[
-          ["01", "Order online", "Choose products and services whenever it suits you."],
-          ["02", "We prepare it", "Our team gets your order ready and sends an update."],
-          ["03", "Pick up on campus", "Show your order number at the Business Center."],
-        ].map((x) => (
-          <div key={x[0]} className="rounded-lg border border-[#dee2d9] bg-white p-5">
-            <div className="text-xs font-bold text-[#8a947e]">{x[0]}</div>
-            <div className="mt-4 text-sm font-semibold text-[#163d2f]">{x[1]}</div>
-            <p className="mt-1 text-xs leading-5 text-[#7b847c]">{x[2]}</p>
+      <section className="animate-enter [animation-delay:80ms]">
+        <SectionTitle
+          title="Featured products"
+          subtitle="Student favorites, stocked and ready for campus pickup."
+          action={
+            <Button
+              kind="ghost"
+              onClick={() => setPage("Products")}
+              className="flex items-center gap-2"
+            >
+              View all <ArrowRight size={14} />
+            </Button>
+          }
+        />
+        <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
+          {products.slice(0, 4).map((p) => (
+            <ProductCard key={p.id} product={p} add={add} open={open} />
+          ))}
+        </div>
+      </section>
+
+      <section className="animate-enter mt-16 [animation-delay:140ms]">
+        <div className="mb-7 max-w-2xl">
+          <div className="text-[10px] font-bold uppercase tracking-[.2em] text-[#658071]">
+            Simple by design
           </div>
-        ))}
-      </div>
+          <h2 className="mt-3 text-2xl font-semibold tracking-[-.035em] text-[#163d2f] sm:text-3xl">
+            From cart to campus counter in three easy steps.
+          </h2>
+          <p className="mt-3 text-xs leading-6 text-[#77827a]">
+            Built around a student’s schedule, so getting essentials never gets in the way of class.
+          </p>
+        </div>
+        <div className="grid gap-5 md:grid-cols-3">
+          {steps.map((step) => {
+            const Icon = step.icon;
+            return (
+              <article
+                key={step.number}
+                className="group relative min-h-[250px] overflow-hidden rounded-2xl border border-[#dce2d8] bg-white p-7 shadow-[0_8px_30px_rgba(31,62,46,.05)] transition-all duration-300 hover:-translate-y-1 hover:border-[#c4d1c2] hover:shadow-[0_18px_44px_rgba(31,62,46,.1)] sm:p-8"
+              >
+                <div className="absolute right-5 top-3 text-6xl font-bold tracking-[-.08em] text-[#edf0e9] transition group-hover:text-[#e7ece4]">
+                  {step.number}
+                </div>
+                <span
+                  className={`relative grid size-12 place-items-center rounded-xl ${step.accent}`}
+                >
+                  <Icon size={21} />
+                </span>
+                <h3 className="relative mt-10 text-lg font-semibold text-[#163d2f]">
+                  {step.title}
+                </h3>
+                <p className="relative mt-3 max-w-xs text-xs leading-6 text-[#77827a]">
+                  {step.description}
+                </p>
+              </article>
+            );
+          })}
+        </div>
+      </section>
     </>
   );
 }
@@ -1210,6 +1357,72 @@ function ManagementPage({ page }: { page: string }) {
   );
 }
 
+function Footer({ setPage }: { setPage: (page: string) => void }) {
+  return (
+    <footer className="mt-12 bg-[#123d2c] text-white">
+      <div className="mx-auto grid max-w-[1270px] gap-10 px-6 py-12 sm:px-9 md:grid-cols-[1.3fr_.8fr_1fr] lg:py-14">
+        <div className="max-w-md">
+          <div className="flex items-center gap-3">
+            <span className="grid size-14 place-items-center rounded-full bg-white p-1.5">
+              <img
+                src="/assets/plmun-logo.png"
+                alt="PLMun seal"
+                className="size-full object-contain"
+              />
+            </span>
+            <div className="text-xs font-bold tracking-[.1em]">PLMUN BUSINESS CENTER</div>
+          </div>
+          <p className="mt-5 text-xs leading-6 text-white/58">
+            Reliable campus essentials and document services for the PLMun community, available
+            online and ready for convenient pickup.
+          </p>
+        </div>
+        <div>
+          <div className="text-[10px] font-bold uppercase tracking-[.18em] text-white/45">
+            Explore
+          </div>
+          <div className="mt-4 grid gap-3 text-xs text-white/68">
+            {["Products", "Services", "My orders"].map((item) => (
+              <button
+                key={item}
+                onClick={() => setPage(item)}
+                className="w-fit transition hover:translate-x-0.5 hover:text-white"
+              >
+                {item}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div>
+          <div className="text-[10px] font-bold uppercase tracking-[.18em] text-white/45">
+            Visit the center
+          </div>
+          <div className="mt-4 space-y-3 text-xs leading-5 text-white/68">
+            <div className="flex items-start gap-2.5">
+              <MapPin size={15} className="mt-0.5 shrink-0 text-[#9fbca5]" />
+              PLMun Campus, Muntinlupa City
+            </div>
+            <div className="flex items-center gap-2.5">
+              <Clock3 size={15} className="shrink-0 text-[#9fbca5]" />
+              Monday–Friday, 8:00 AM–5:00 PM
+            </div>
+            <div className="flex items-center gap-2.5">
+              <Mail size={15} className="shrink-0 text-[#9fbca5]" />
+              businesscenter@plmun.edu.ph
+            </div>
+          </div>
+        </div>
+      </div>
+      <div className="border-t border-white/8">
+        <div className="mx-auto flex max-w-[1270px] flex-wrap items-center justify-between gap-3 px-6 py-5 text-[9px] text-white/38 sm:px-9">
+          <span>© {new Date().getFullYear()} Pamantasan ng Lungsod ng Muntinlupa</span>
+          <span>Built for better campus service</span>
+        </div>
+      </div>
+    </footer>
+  );
+}
+
 export default function App() {
   const [user, setUser] = useState<AuthUser | null>(readStoredSession);
   const [page, setPage] = useState("Home");
@@ -1330,7 +1543,10 @@ export default function App() {
         />
         <div className="mx-auto flex min-h-[calc(100vh-72px)] max-w-[1500px]">
           <Sidebar role={role} page={page} setPage={setPage} />
-          <main className="min-w-0 flex-1 p-4 sm:p-7 lg:p-9">{content}</main>
+          <div className="flex min-w-0 flex-1 flex-col">
+            <main className="min-w-0 flex-1 p-4 sm:p-7 lg:p-9">{content}</main>
+            {role === "student" && <Footer setPage={setPage} />}
+          </div>
         </div>
         {toast && (
           <div className="fixed bottom-5 right-5 z-50 rounded-md bg-[#173f30] px-4 py-3 text-xs font-semibold text-white shadow-xl">

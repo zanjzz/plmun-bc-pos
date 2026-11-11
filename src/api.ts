@@ -80,7 +80,3 @@ export async function apiRequest<T>(
 
   return body as T;
 }
-
-export async function initializeDatabase() {
-  await apiRequest<{ seeded: boolean }>("/seed", { method: "POST" });
-}
