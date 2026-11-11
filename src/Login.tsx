@@ -175,7 +175,7 @@ export default function Login({ onAuthenticated }: { onAuthenticated: (user: Aut
                       <input
                         value={reference}
                         onChange={(event) => setReference(event.target.value)}
-                        placeholder="2025-00000"
+                        placeholder="24174622"
                         required
                       />
                     </div>
@@ -190,7 +190,7 @@ export default function Login({ onAuthenticated }: { onAuthenticated: (user: Aut
                     type="email"
                     value={email}
                     onChange={(event) => setEmail(event.target.value)}
-                    placeholder="name@plmun.edu.ph"
+                    placeholder="name_course@plmun.edu.ph"
                     autoComplete="username"
                     required
                   />
