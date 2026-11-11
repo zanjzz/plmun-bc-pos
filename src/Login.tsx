@@ -96,8 +96,8 @@ export default function Login({
       <div className="pointer-events-none absolute -right-32 -top-40 size-[620px] rounded-full bg-[#d3dfd2]/70 blur-3xl" />
       <div className="pointer-events-none absolute -bottom-52 -left-32 size-[620px] rounded-full bg-[#e4dcc8]/70 blur-3xl" />
 
-      <div className="animate-enter relative mx-auto grid min-h-[calc(100vh-1.5rem)] max-w-[1240px] overflow-hidden rounded-[28px] border border-white/80 bg-[#fbfcf8] shadow-[0_30px_100px_rgba(27,61,45,.14)] sm:min-h-[calc(100vh-3rem)] lg:grid-cols-[1.08fr_.92fr]">
-        <section className="relative hidden overflow-hidden bg-[#123d2c] p-12 text-white lg:flex lg:flex-col xl:p-16">
+      <div className="login-panel animate-enter relative mx-auto grid min-h-[calc(100vh-1.5rem)] max-w-[1240px] overflow-hidden rounded-[28px] border border-white/80 bg-[#fbfcf8] shadow-[0_30px_100px_rgba(27,61,45,.14)] sm:min-h-[calc(100vh-3rem)] lg:grid-cols-[1.08fr_.92fr]">
+        <section className="login-brand-panel relative hidden overflow-hidden bg-[#123d2c] p-12 text-white lg:flex lg:flex-col xl:p-16">
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_15%_10%,rgba(255,255,255,.15),transparent_30%),linear-gradient(145deg,transparent_42%,rgba(163,184,146,.2))]" />
           <div className="absolute -bottom-24 -right-24 size-80 rounded-full border border-white/10" />
           <div className="absolute -bottom-12 -right-12 size-56 rounded-full border border-white/10" />
@@ -121,23 +121,13 @@ export default function Login({
               Order school supplies, request document services, and manage Business Center
               operations through one secure workspace.
             </p>
-            <div className="mt-10 grid max-w-lg grid-cols-3 gap-3">
-              {["Student orders", "Counter sales", "Live inventory"].map((item) => (
-                <div
-                  key={item}
-                  className="rounded-xl border border-white/10 bg-white/6 px-3 py-4 text-[10px] font-medium text-white/75 backdrop-blur"
-                >
-                  {item}
-                </div>
-              ))}
-            </div>
           </div>
           <p className="relative text-[10px] tracking-wide text-white/40">
             Pamantasan ng Lungsod ng Muntinlupa
           </p>
         </section>
 
-        <section className="flex items-center justify-center p-6 sm:p-10 lg:p-14">
+        <section className="login-form-panel flex items-center justify-center p-6 sm:p-10 lg:p-14">
           <div className="w-full max-w-[450px]">
             <div className="mb-9 flex items-center gap-3 lg:hidden">
               <img
@@ -150,7 +140,7 @@ export default function Login({
               </div>
             </div>
 
-            <div className="flex rounded-lg bg-[#e9ece4] p-1">
+            <div className="auth-tabs flex rounded-lg bg-[#e9ece4] p-1">
               {(["login", "register"] as const).map((item) => (
                 <button
                   key={item}

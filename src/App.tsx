@@ -1995,7 +1995,9 @@ export default function App() {
     document.documentElement.dataset.theme = theme;
     window.localStorage.setItem("plmun-theme", theme);
     const favicon = document.querySelector<HTMLLinkElement>("#app-favicon");
-    if (favicon) favicon.href = `/favicon-${theme}.png`;
+    if (favicon) favicon.href = `/assets/plmun-favicon-${theme}-theme.png`;
+    const themeColor = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
+    if (themeColor) themeColor.content = theme === "dark" ? "#0b1510" : "#123d2c";
   }, [theme]);
   const toggleTheme = () => setTheme((current) => (current === "light" ? "dark" : "light"));
   const add = (p: Product) => {
