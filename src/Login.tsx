@@ -179,6 +179,7 @@ export default function Login({ onAuthenticated }: { onAuthenticated: (user: Aut
               {error && (
                 <div
                   role="alert"
+                  aria-live="polite"
                   className="rounded-md border border-[#dfc6bd] bg-[#fbefeb] px-3 py-2.5 text-xs text-[#8b4333]"
                 >
                   {error}

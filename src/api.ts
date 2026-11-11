@@ -34,18 +34,50 @@ export async function apiRequest<T>(
     });
   } catch {
     throw new Error(
-      "The Supabase backend is unavailable. Deploy the server Edge Function, then try again.",
+      "We couldn’t connect to the Business Center server. Check your connection and try again.",
     );
   }
-  const body = await response.json();
+
+  const responseText = await response.text();
+  let body: { error?: string } | null = null;
+  if (responseText.trim()) {
+    try {
+      body = JSON.parse(responseText) as { error?: string };
+    } catch {
+      body = null;
+    }
+  }
+
   if (!response.ok) {
     if (response.status === 404) {
       throw new Error(
-        "The Supabase server function has not been deployed yet. Deploy it before signing in.",
+        "Account services aren’t available yet. The Supabase server function still needs to be deployed.",
       );
     }
-    throw new Error(body.error ?? "The request could not be completed.");
+    if (response.status === 401) {
+      throw new Error(body?.error ?? "Your email or password is incorrect. Please try again.");
+    }
+    if (response.status === 403) {
+      throw new Error(body?.error ?? "You don’t have permission to complete this action.");
+    }
+    if (response.status === 409) {
+      throw new Error(body?.error ?? "An account with these details already exists.");
+    }
+    if (response.status === 429) {
+      throw new Error("Too many attempts. Please wait a moment before trying again.");
+    }
+    if (response.status >= 500) {
+      throw new Error(
+        body?.error ?? "The server is temporarily unavailable. Please try again shortly.",
+      );
+    }
+    throw new Error(body?.error ?? "We couldn’t complete your request. Please check your details.");
   }
+
+  if (!body) {
+    throw new Error("The server returned an unexpected response. Please contact support.");
+  }
+
   return body as T;
 }
 
