@@ -344,6 +344,114 @@ app.get(`${prefix}/users`, async (c) => {
   return c.json({ users: data });
 });
 
+app.post(`${prefix}/users`, async (c) => {
+  const auth = await requireRole(c, ["admin"]);
+  if (auth.response) return auth.response;
+  const input = await c.req.json();
+  const email = String(input.email ?? "")
+    .trim()
+    .toLowerCase();
+  const fullName = String(input.fullName ?? "").trim();
+  const password = String(input.password ?? "");
+  const role = ["student", "staff", "admin"].includes(input.role) ? input.role : "student";
+  if (!email.includes("@") || !fullName || password.length < 8) {
+    return c.json(
+      { error: "Enter a name, valid email, and a password with at least 8 characters." },
+      400,
+    );
+  }
+  const { data, error } = await adminClient().auth.admin.createUser({
+    email,
+    password,
+    email_confirm: true,
+    user_metadata: { name: fullName, role, reference: String(input.reference ?? "") },
+  });
+  if (error || !data.user)
+    return c.json({ error: error?.message ?? "Unable to create user." }, 400);
+  const { data: profile, error: profileError } = await adminClient()
+    .from("profiles")
+    .upsert({
+      id: data.user.id,
+      email,
+      full_name: fullName,
+      role,
+      reference: String(input.reference ?? ""),
+      active: true,
+    })
+    .select()
+    .single();
+  if (profileError) return c.json({ error: profileError.message }, 500);
+  return c.json({ user: profile }, 201);
+});
+
+app.put(`${prefix}/users/:id`, async (c) => {
+  const auth = await requireRole(c, ["admin"]);
+  if (auth.response) return auth.response;
+  const id = c.req.param("id");
+  const input = await c.req.json();
+  const isSelf = id === auth.profile.id;
+  const { data: current, error: currentError } = await adminClient()
+    .from("profiles")
+    .select("*")
+    .eq("id", id)
+    .single();
+  if (currentError) return c.json({ error: "User not found." }, 404);
+  const role = isSelf
+    ? "admin"
+    : ["student", "staff", "admin"].includes(input.role)
+      ? input.role
+      : current.role;
+  const active = isSelf ? true : input.active !== false;
+  const email = String(input.email ?? current.email)
+    .trim()
+    .toLowerCase();
+  const fullName = String(input.fullName ?? current.full_name).trim();
+  const reference = String(input.reference ?? current.reference);
+  const authUpdates: any = {
+    email,
+    email_confirm: true,
+    user_metadata: { name: fullName, role, reference },
+    ban_duration: active ? "none" : "876000h",
+  };
+  if (input.password) {
+    if (String(input.password).length < 8) {
+      return c.json({ error: "A new password must contain at least 8 characters." }, 400);
+    }
+    authUpdates.password = String(input.password);
+  }
+  const { error: authError } = await adminClient().auth.admin.updateUserById(id, authUpdates);
+  if (authError) return c.json({ error: authError.message }, 400);
+  const { data, error } = await adminClient()
+    .from("profiles")
+    .update({ email, full_name: fullName, role, reference, active })
+    .eq("id", id)
+    .select()
+    .single();
+  if (error) return c.json({ error: error.message }, 400);
+  return c.json({ user: data });
+});
+
+app.delete(`${prefix}/users/:id`, async (c) => {
+  const auth = await requireRole(c, ["admin"]);
+  if (auth.response) return auth.response;
+  const id = c.req.param("id");
+  if (id === auth.profile.id) {
+    return c.json({ error: "You cannot remove your own administrator access." }, 400);
+  }
+  const { error: authError } = await adminClient().auth.admin.updateUserById(id, {
+    ban_duration: "876000h",
+  });
+  if (authError) return c.json({ error: authError.message }, 400);
+  const { data, error } = await adminClient()
+    .from("profiles")
+    .update({ active: false })
+    .eq("id", id)
+    .select()
+    .single();
+  if (error) return c.json({ error: error.message }, 400);
+  return c.json({ user: data, removed: true });
+});
+
 app.get(`${prefix}/products`, async (c) => {
   const { data, error } = await adminClient()
     .from("products")

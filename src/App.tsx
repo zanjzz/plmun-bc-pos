@@ -15,9 +15,11 @@ import {
   Mail,
   MapPin,
   Menu,
+  Moon,
   Package,
   PackageCheck,
   Printer,
+  Save,
   ScanLine,
   Search,
   ShieldCheck,
@@ -25,7 +27,11 @@ import {
   ShoppingCart,
   Sparkles,
   Store,
+  Sun,
+  UserPlus,
   Users,
+  UserX,
+  Pencil,
   XCircle,
   type LucideIcon,
 } from "lucide-react";
@@ -47,6 +53,7 @@ import {
   type Product,
   updateProduct,
 } from "./products";
+import { createUser, getUsers, type ManagedUser, removeUser, updateUser } from "./users";
 
 type ProductStore = {
   products: Product[];
@@ -144,6 +151,22 @@ const navIcons: Record<string, LucideIcon> = {
 
 const peso = (value: number) => `₱${value.toFixed(2)}`;
 
+type Theme = "light" | "dark";
+
+function ThemeToggle({ theme, onToggle }: { theme: Theme; onToggle: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      className="theme-toggle grid size-9 place-items-center rounded-lg border border-[#d8ddd4] bg-white/70 text-[#486056] transition hover:-translate-y-0.5 hover:border-[#8da092]"
+      aria-label={`Switch to ${theme === "light" ? "dark" : "light"} mode`}
+      title={`Switch to ${theme === "light" ? "dark" : "light"} mode`}
+    >
+      {theme === "light" ? <Moon size={16} /> : <Sun size={16} />}
+    </button>
+  );
+}
+
 function Mark() {
   return (
     <div className="flex items-center gap-2.5">
@@ -217,17 +240,21 @@ function Header({
   setPage,
   cartCount,
   onSignOut,
+  theme,
+  onToggleTheme,
 }: {
   user: AuthUser;
   page: string;
   setPage: (p: string) => void;
   cartCount: number;
   onSignOut: () => void;
+  theme: Theme;
+  onToggleTheme: () => void;
 }) {
   const role = user.role;
   const [mobileOpen, setMobileOpen] = useState(false);
   return (
-    <header className="sticky top-0 z-30 border-b border-[#dfe1d8]/80 bg-[#fbfcf7]/90 shadow-[0_1px_12px_rgba(28,61,45,.04)] backdrop-blur-xl">
+    <header className="site-header sticky top-0 z-30 border-b border-[#dfe1d8]/80 bg-[#fbfcf7]/90 shadow-[0_1px_12px_rgba(28,61,45,.04)] backdrop-blur-xl">
       <div className="mx-auto flex h-[72px] max-w-[1500px] items-center gap-7 px-4 sm:px-7">
         <button
           onClick={() => setPage(role === "student" ? "Home" : "Dashboard")}
@@ -270,6 +297,7 @@ function Header({
             </span>
           </button>
         )}
+        <ThemeToggle theme={theme} onToggle={onToggleTheme} />
         <div className="hidden text-right sm:block">
           <div className="text-[11px] font-semibold text-[#263d32]">{user.name}</div>
           <div className="text-[9px] capitalize text-[#899087]">{role}</div>
@@ -330,7 +358,7 @@ function Sidebar({
 }) {
   if (role === "student") return null;
   return (
-    <aside className="hidden w-[230px] shrink-0 border-r border-[#dfe1d8] bg-[#f8f9f3] p-4 lg:flex lg:flex-col">
+    <aside className="site-sidebar hidden w-[230px] shrink-0 border-r border-[#dfe1d8] bg-[#f8f9f3] p-4 lg:flex lg:flex-col">
       <div className="space-y-1">
         {navByRole[role].map((item) => {
           const Icon = navIcons[item] ?? ArrowRight;
@@ -1320,6 +1348,267 @@ function OrderManagementPage() {
   );
 }
 
+function UserManagementPage({ currentUserId }: { currentUserId: string }) {
+  const [users, setUsers] = useState<ManagedUser[]>([]);
+  const [editing, setEditing] = useState<ManagedUser | "new" | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [draft, setDraft] = useState({
+    fullName: "",
+    email: "",
+    role: "student" as Role,
+    reference: "",
+    password: "",
+    active: true,
+  });
+  const loadUsers = async () => {
+    setLoading(true);
+    try {
+      setUsers(await getUsers());
+      setError("");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Users could not be loaded.");
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => {
+    void loadUsers();
+  }, []);
+  const openForm = (user?: ManagedUser) => {
+    setEditing(user ?? "new");
+    setDraft(
+      user
+        ? {
+            fullName: user.full_name,
+            email: user.email,
+            role: user.role,
+            reference: user.reference,
+            password: "",
+            active: user.active,
+          }
+        : {
+            fullName: "",
+            email: "",
+            role: "student",
+            reference: "",
+            password: "",
+            active: true,
+          },
+    );
+    setError("");
+  };
+  const saveUser = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setSaving(true);
+    try {
+      const saved =
+        editing === "new"
+          ? await createUser({ ...draft, password: draft.password })
+          : await updateUser(editing!.id, {
+              ...draft,
+              password: draft.password || undefined,
+            });
+      setUsers((current) =>
+        editing === "new"
+          ? [saved, ...current]
+          : current.map((user) => (user.id === saved.id ? saved : user)),
+      );
+      setEditing(null);
+      setError("");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "The account could not be saved.");
+    } finally {
+      setSaving(false);
+    }
+  };
+  const toggleAccess = async (user: ManagedUser) => {
+    try {
+      const updated = user.active
+        ? await removeUser(user.id)
+        : await updateUser(user.id, {
+            email: user.email,
+            fullName: user.full_name,
+            role: user.role,
+            reference: user.reference,
+            active: true,
+          });
+      setUsers((current) =>
+        current.map((candidate) => (candidate.id === updated.id ? updated : candidate)),
+      );
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Account access could not be changed.");
+    }
+  };
+
+  return (
+    <>
+      <SectionTitle
+        title="User management"
+        subtitle="Create accounts, update roles, and control access."
+        action={
+          <Button onClick={() => openForm()} className="flex items-center gap-2">
+            <UserPlus size={14} /> Add user
+          </Button>
+        }
+      />
+      {error && (
+        <div className="mb-4 rounded-lg border border-[#dfc6bd] bg-[#fbefeb] p-3 text-xs text-[#8b4333]">
+          {error}
+        </div>
+      )}
+      <div className="overflow-hidden rounded-xl border border-[#dce1d7] bg-white">
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Reference</th>
+                <th>Role</th>
+                <th>Status</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {users.map((user) => (
+                <tr key={user.id}>
+                  <td className="font-semibold text-[#294c3d]">
+                    {user.full_name}
+                    {user.id === currentUserId && (
+                      <span className="ml-2 text-[9px] font-medium text-[#849087]">You</span>
+                    )}
+                  </td>
+                  <td>{user.email}</td>
+                  <td>{user.reference || "—"}</td>
+                  <td className="capitalize">{user.role}</td>
+                  <td>
+                    <Pill tone={user.active ? "green" : "gray"}>
+                      {user.active ? "Active" : "Access removed"}
+                    </Pill>
+                  </td>
+                  <td>
+                    <div className="flex items-center justify-end gap-2">
+                      <button
+                        onClick={() => openForm(user)}
+                        className="flex items-center gap-1.5 rounded-md px-2.5 py-2 text-[10px] font-semibold text-[#315b48] hover:bg-[#edf2eb]"
+                      >
+                        <Pencil size={13} /> Edit
+                      </button>
+                      {user.id !== currentUserId && (
+                        <button
+                          onClick={() => toggleAccess(user)}
+                          className={`flex items-center gap-1.5 rounded-md px-2.5 py-2 text-[10px] font-semibold ${user.active ? "text-[#8a493e] hover:bg-[#fbefeb]" : "text-[#315b48] hover:bg-[#edf2eb]"}`}
+                        >
+                          <UserX size={13} /> {user.active ? "Remove" : "Restore"}
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {!loading && !users.length && (
+                <tr>
+                  <td colSpan={6} className="py-12 text-center text-xs">
+                    No accounts found.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      {loading && <div className="mt-4 text-xs text-[#7d857e]">Loading accounts…</div>}
+
+      {editing && (
+        <div
+          className="fixed inset-0 z-50 grid place-items-center bg-[#10251d]/60 p-4 backdrop-blur-sm"
+          onMouseDown={() => setEditing(null)}
+        >
+          <form
+            onSubmit={saveUser}
+            onMouseDown={(event) => event.stopPropagation()}
+            className="w-full max-w-xl rounded-2xl border border-white/20 bg-white p-6 shadow-2xl"
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-semibold text-[#173d2f]">
+                  {editing === "new" ? "Create account" : "Edit account"}
+                </h2>
+                <p className="mt-1 text-[10px] text-[#7f8982]">
+                  Credentials are stored in Supabase Auth; profile access is stored separately.
+                </p>
+              </div>
+              <button type="button" onClick={() => setEditing(null)} className="text-xs">
+                Close
+              </button>
+            </div>
+            <div className="mt-6 grid gap-4 sm:grid-cols-2">
+              <label className="field">
+                Full name
+                <input
+                  value={draft.fullName}
+                  onChange={(event) => setDraft({ ...draft, fullName: event.target.value })}
+                  required
+                />
+              </label>
+              <label className="field">
+                Email
+                <input
+                  type="email"
+                  value={draft.email}
+                  onChange={(event) => setDraft({ ...draft, email: event.target.value })}
+                  required
+                />
+              </label>
+              <label className="field">
+                Reference
+                <input
+                  value={draft.reference}
+                  onChange={(event) => setDraft({ ...draft, reference: event.target.value })}
+                  placeholder="Student or employee ID"
+                />
+              </label>
+              <label className="field">
+                Role
+                <select
+                  value={draft.role}
+                  onChange={(event) => setDraft({ ...draft, role: event.target.value as Role })}
+                  disabled={editing !== "new" && editing.id === currentUserId}
+                >
+                  <option value="student">Student</option>
+                  <option value="staff">Staff</option>
+                  <option value="admin">Administrator</option>
+                </select>
+              </label>
+              <label className="field sm:col-span-2">
+                {editing === "new" ? "Temporary password" : "New password (optional)"}
+                <input
+                  type="password"
+                  minLength={8}
+                  value={draft.password}
+                  onChange={(event) => setDraft({ ...draft, password: event.target.value })}
+                  placeholder="At least 8 characters"
+                  required={editing === "new"}
+                />
+              </label>
+            </div>
+            <div className="mt-6 flex justify-end gap-2">
+              <Button kind="secondary" onClick={() => setEditing(null)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={saving} className="flex items-center gap-2">
+                <Save size={14} /> {saving ? "Saving…" : "Save account"}
+              </Button>
+            </div>
+          </form>
+        </div>
+      )}
+    </>
+  );
+}
+
 function ManagementPage({ page }: { page: string }) {
   const { products, addProduct, editProduct, removeProduct } = useProductStore();
   const isProduct = page === "Product management";
@@ -1626,7 +1915,7 @@ function ManagementPage({ page }: { page: string }) {
 
 function Footer({ setPage }: { setPage: (page: string) => void }) {
   return (
-    <footer className="mt-12 bg-[#123d2c] text-white">
+    <footer className="site-footer mt-12 bg-[#123d2c] text-white">
       <div className="mx-auto grid max-w-[1270px] gap-10 px-6 py-12 sm:px-9 md:grid-cols-[1.3fr_.8fr_1fr] lg:py-14">
         <div className="max-w-md">
           <div className="flex items-center gap-3">
@@ -1691,12 +1980,24 @@ function Footer({ setPage }: { setPage: (page: string) => void }) {
 }
 
 export default function App() {
+  const [theme, setTheme] = useState<Theme>(() => {
+    const stored = window.localStorage.getItem("plmun-theme");
+    if (stored === "light" || stored === "dark") return stored;
+    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  });
   const [user, setUser] = useState<AuthUser | null>(readStoredSession);
   const [page, setPage] = useState("Home");
   const [cart, setCart] = useState<Record<number, number>>({ 1: 1, 2: 1 });
   const [selected, setSelected] = useState<Product | null>(null);
   const [toast, setToast] = useState("");
   const cartCount = useMemo(() => Object.values(cart).reduce((a, b) => a + b, 0), [cart]);
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    window.localStorage.setItem("plmun-theme", theme);
+    const favicon = document.querySelector<HTMLLinkElement>("#app-favicon");
+    if (favicon) favicon.href = `/favicon-${theme}.png`;
+  }, [theme]);
+  const toggleTheme = () => setTheme((current) => (current === "light" ? "dark" : "light"));
   const add = (p: Product) => {
     setCart((c) => ({ ...c, [p.id]: (c[p.id] || 0) + 1 }));
     setToast(`${p.name} added to cart`);
@@ -1705,6 +2006,8 @@ export default function App() {
   if (!user) {
     return (
       <Login
+        theme={theme}
+        onToggleTheme={toggleTheme}
         onAuthenticated={(nextUser) => {
           setUser(nextUser);
           setPage(nextUser.role === "student" ? "Home" : "Dashboard");
@@ -1826,18 +2129,26 @@ export default function App() {
     if (page === "Dashboard") return <Dashboard role={role} setPage={setPage} />;
     if (role === "staff" && page === "POS terminal") return <PosTerminal />;
     if (role === "staff" && page === "Order management") return <OrderManagementPage />;
+    if (role === "admin" && page === "User management") {
+      return <UserManagementPage currentUserId={user.id} />;
+    }
     return <ManagementPage page={page} />;
   })();
 
   return (
     <ProductDataProvider>
-      <div className="min-h-screen bg-[#f1f1e8] text-[#223b30]">
+      <div
+        data-theme={theme}
+        className="app-shell min-h-screen bg-[#f1f1e8] text-[#223b30] transition-colors duration-300"
+      >
         <Header
           user={user}
           page={page}
           setPage={setPage}
           cartCount={cartCount}
           onSignOut={signOut}
+          theme={theme}
+          onToggleTheme={toggleTheme}
         />
         <div className="mx-auto flex min-h-[calc(100vh-72px)] max-w-[1500px]">
           <Sidebar role={role} page={page} setPage={setPage} />
