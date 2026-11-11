@@ -125,6 +125,61 @@ async function requireAdmin(c: any) {
   return { user };
 }
 
+async function requireStaff(c: any) {
+  const user = await authenticatedUser(c);
+  if (!user) return { response: c.json({ error: "Authentication required." }, 401) };
+  if (!["staff", "admin"].includes(user.user_metadata?.role)) {
+    return { response: c.json({ error: "Staff access required." }, 403) };
+  }
+  return { user };
+}
+
+async function reconcileOnlineOrders() {
+  const products = ((await kv.get("products")) ?? initialProducts) as any[];
+  const orders = ((await kv.getByPrefix("order:")) ?? []) as any[];
+  const available = new Map(products.map((product) => [Number(product.id), Number(product.stock)]));
+  const activeOrders = orders
+    .filter((order) => ["Pending review", "Confirmed", "Awaiting restock"].includes(order.status))
+    .sort(
+      (first, second) => new Date(first.createdAt).getTime() - new Date(second.createdAt).getTime(),
+    );
+  const changed: any[] = [];
+
+  for (const order of activeOrders) {
+    const missing = order.items.filter(
+      (item: any) => (available.get(Number(item.productId)) ?? 0) < Number(item.quantity),
+    );
+    const nextStatus = missing.length ? "Awaiting restock" : "Confirmed";
+    const nextMessage = missing.length
+      ? `${missing.map((item: any) => item.name).join(", ")} became unavailable after a walk-in sale.`
+      : "Stock is available and your order is confirmed.";
+
+    if (!missing.length) {
+      for (const item of order.items) {
+        available.set(
+          Number(item.productId),
+          (available.get(Number(item.productId)) ?? 0) - Number(item.quantity),
+        );
+      }
+    }
+
+    if (order.status !== nextStatus || order.statusMessage !== nextMessage) {
+      order.status = nextStatus;
+      order.statusMessage = nextMessage;
+      order.updatedAt = new Date().toISOString();
+      changed.push(order);
+    }
+  }
+
+  if (changed.length) {
+    await kv.mset(
+      changed.map((order) => `order:${order.id}`),
+      changed,
+    );
+  }
+  return changed;
+}
+
 app.get(`${prefix}/health`, (c) => c.json({ status: "ok" }));
 
 app.post(`${prefix}/seed`, async (c) => {
@@ -192,7 +247,6 @@ app.post(`${prefix}/auth/demo-login`, async (c) => {
     if (existing) {
       const { error } = await client.auth.admin.updateUserById(existing.id, {
         password: account.password,
-        email_confirm: true,
         user_metadata: account.metadata,
       });
       if (error) throw error;
@@ -288,6 +342,149 @@ app.get(`${prefix}/products`, async (c) => {
   return c.json({ products });
 });
 
+app.get(`${prefix}/orders`, async (c) => {
+  const user = await authenticatedUser(c);
+  if (!user) return c.json({ error: "Authentication required." }, 401);
+  const allOrders = ((await kv.getByPrefix("order:")) ?? []) as any[];
+  const orders =
+    user.user_metadata?.role === "student"
+      ? allOrders.filter((order) => order.userId === user.id)
+      : allOrders;
+  return c.json({
+    orders: orders.sort(
+      (first, second) => new Date(second.createdAt).getTime() - new Date(first.createdAt).getTime(),
+    ),
+  });
+});
+
+app.post(`${prefix}/orders`, async (c) => {
+  const user = await authenticatedUser(c);
+  if (!user) return c.json({ error: "Authentication required." }, 401);
+  const input = await c.req.json();
+  const products = ((await kv.get("products")) ?? initialProducts) as any[];
+  const items = (input.items ?? [])
+    .map((item: any) => {
+      const product = products.find((candidate) => Number(candidate.id) === Number(item.productId));
+      if (!product || Number(item.quantity) < 1) return null;
+      return {
+        productId: product.id,
+        name: product.name,
+        quantity: Number(item.quantity),
+        price: Number(product.price),
+      };
+    })
+    .filter(Boolean);
+  if (!items.length) return c.json({ error: "Your order has no valid items." }, 400);
+
+  const id = `ORD-${Date.now().toString().slice(-7)}`;
+  const order = {
+    id,
+    userId: user.id,
+    customerName: user.user_metadata?.name ?? user.email,
+    customerEmail: user.email,
+    items,
+    total: items.reduce((total: number, item: any) => total + item.price * item.quantity, 0),
+    status: "Pending review",
+    statusMessage: "We’re checking current counter stock before confirming your order.",
+    pickupDate: input.pickupDate,
+    pickupWindow: input.pickupWindow,
+    notes: String(input.notes ?? ""),
+    source: "online",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+  await kv.set(`order:${id}`, order);
+  await reconcileOnlineOrders();
+  return c.json({ order: await kv.get(`order:${id}`) }, 201);
+});
+
+app.put(`${prefix}/orders/:id/status`, async (c) => {
+  const auth = await requireStaff(c);
+  if (auth.response) return auth.response;
+  const order = await kv.get(`order:${c.req.param("id")}`);
+  if (!order) return c.json({ error: "Order not found." }, 404);
+  const { status, message } = await c.req.json();
+  const allowed = ["Confirmed", "Awaiting restock", "Ready for pickup", "Completed", "Cancelled"];
+  if (!allowed.includes(status)) return c.json({ error: "Invalid order status." }, 400);
+
+  if (status === "Confirmed" && order.status === "Awaiting restock") {
+    await reconcileOnlineOrders();
+    const reconciled = await kv.get(`order:${order.id}`);
+    if (reconciled.status !== "Confirmed") {
+      return c.json({ error: "This order still does not have enough stock." }, 409);
+    }
+    return c.json({ order: reconciled });
+  }
+
+  if (status === "Ready for pickup" && order.status !== "Ready for pickup") {
+    const products = ((await kv.get("products")) ?? initialProducts) as any[];
+    for (const item of order.items) {
+      const product = products.find((candidate) => Number(candidate.id) === Number(item.productId));
+      if (!product || Number(product.stock) < Number(item.quantity)) {
+        await reconcileOnlineOrders();
+        return c.json(
+          { error: `${product?.name ?? "An item"} is no longer available for this order.` },
+          409,
+        );
+      }
+    }
+    for (const item of order.items) {
+      const product = products.find((candidate) => Number(candidate.id) === Number(item.productId));
+      product.stock = Number(product.stock) - Number(item.quantity);
+    }
+    await kv.set("products", products);
+  }
+
+  const updated = {
+    ...order,
+    status,
+    statusMessage: String(message ?? order.statusMessage),
+    updatedAt: new Date().toISOString(),
+  };
+  await kv.set(`order:${order.id}`, updated);
+  if (["Cancelled", "Completed", "Ready for pickup"].includes(status)) {
+    await reconcileOnlineOrders();
+  }
+  return c.json({ order: updated });
+});
+
+app.post(`${prefix}/pos/checkout`, async (c) => {
+  const auth = await requireStaff(c);
+  if (auth.response) return auth.response;
+  const input = await c.req.json();
+  const products = ((await kv.get("products")) ?? initialProducts) as any[];
+  const saleItems = (input.items ?? []).filter((item: any) => Number(item.quantity) > 0);
+
+  for (const item of saleItems) {
+    const product = products.find((candidate) => Number(candidate.id) === Number(item.productId));
+    if (!product || Number(product.stock) < Number(item.quantity)) {
+      return c.json({ error: `${product?.name ?? "An item"} does not have enough stock.` }, 409);
+    }
+  }
+
+  for (const item of saleItems) {
+    const product = products.find((candidate) => Number(candidate.id) === Number(item.productId));
+    product.stock = Number(product.stock) - Number(item.quantity);
+  }
+  await kv.set("products", products);
+  const transaction = {
+    id: `TX-${Date.now().toString().slice(-7)}`,
+    items: saleItems,
+    total: saleItems.reduce((total: number, item: any) => {
+      const product = products.find((candidate) => Number(candidate.id) === Number(item.productId));
+      return total + Number(product?.price ?? 0) * Number(item.quantity);
+    }, 0),
+    source: "walk-in",
+    staffId: auth.user?.id,
+    createdAt: new Date().toISOString(),
+  };
+  await kv.set(`transaction:${transaction.id}`, transaction);
+  const impactedOrders = (await reconcileOnlineOrders()).filter(
+    (order) => order.status === "Awaiting restock",
+  );
+  return c.json({ transaction, impactedOrders, products });
+});
+
 app.post(`${prefix}/products`, async (c) => {
   const auth = await requireAdmin(c);
   if (auth.response) return auth.response;
@@ -326,6 +523,7 @@ app.put(`${prefix}/products/:id`, async (c) => {
     stock: Number(input.stock ?? products[index].stock),
   };
   await kv.set("products", products);
+  await reconcileOnlineOrders();
   return c.json({ product: products[index] });
 });
 

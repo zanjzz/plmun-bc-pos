@@ -91,9 +91,6 @@ export default function Login({ onAuthenticated }: { onAuthenticated: (user: Aut
           </div>
 
           <div className="relative my-auto max-w-xl">
-            <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/8 px-3 py-2 text-[10px] font-semibold uppercase tracking-[.18em] text-[#dbe7d6]">
-              <ShieldCheck size={14} /> Official campus services
-            </div>
             <h1 className="text-5xl font-semibold leading-[1.06] tracking-[-.05em] xl:text-6xl">
               Your campus essentials, one sign-in away.
             </h1>

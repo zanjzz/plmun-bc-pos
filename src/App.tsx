@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import {
+  AlertTriangle,
   ArrowRight,
   BarChart3,
   Boxes,
@@ -15,6 +16,7 @@ import {
   MapPin,
   Menu,
   Package,
+  PackageCheck,
   Printer,
   ScanLine,
   Search,
@@ -24,10 +26,19 @@ import {
   Sparkles,
   Store,
   Users,
+  XCircle,
   type LucideIcon,
 } from "lucide-react";
 import { type AuthUser, authProvider, readStoredSession, type Role } from "./auth";
 import Login from "./Login";
+import {
+  completeWalkInSale,
+  createOnlineOrder,
+  getOrders,
+  type OnlineOrder,
+  type OrderStatus,
+  updateOrderStatus,
+} from "./orders";
 import {
   createProduct,
   deleteProduct,
@@ -43,6 +54,7 @@ type ProductStore = {
   addProduct: (product: Omit<Product, "id">) => Promise<void>;
   editProduct: (id: number, updates: Partial<Product>) => Promise<void>;
   removeProduct: (id: number) => Promise<void>;
+  refreshProducts: () => Promise<void>;
 };
 
 const ProductContext = createContext<ProductStore | null>(null);
@@ -78,6 +90,9 @@ function ProductDataProvider({ children }: { children: React.ReactNode }) {
     removeProduct: async (id) => {
       await deleteProduct(id);
       setProducts((current) => current.filter((item) => item.id !== id));
+    },
+    refreshProducts: async () => {
+      setProducts(await getProducts());
     },
   };
 
@@ -233,7 +248,7 @@ function Header({
             ))}
           </nav>
         )}
-        <label className="relative ml-auto hidden w-full max-w-[350px] md:block">
+        <label className="relative ml-auto hidden w-full max-w-[260px] md:block">
           <Search
             size={15}
             className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#8d958b]"
@@ -445,9 +460,6 @@ function StudentHome({
         <div className="pointer-events-none absolute -left-20 -top-20 size-64 rounded-full bg-white/45 blur-3xl" />
         <div className="grid items-stretch lg:grid-cols-[1.08fr_.92fr]">
           <div className="relative p-7 sm:p-11 lg:p-14 xl:p-16">
-            <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-[#bfcdbb] bg-white/45 px-3 py-2 text-[10px] font-bold uppercase tracking-[.18em] text-[#426353]">
-              <Sparkles size={13} /> Campus essentials, simplified
-            </div>
             <h1 className="max-w-2xl text-4xl font-semibold leading-[1.06] tracking-[-.05em] text-[#143b2d] sm:text-5xl xl:text-[56px]">
               Everything you need for a productive school day.
             </h1>
@@ -527,10 +539,7 @@ function StudentHome({
 
       <section className="animate-enter mt-16 [animation-delay:140ms]">
         <div className="mb-7 max-w-2xl">
-          <div className="text-[10px] font-bold uppercase tracking-[.2em] text-[#658071]">
-            Simple by design
-          </div>
-          <h2 className="mt-3 text-2xl font-semibold tracking-[-.035em] text-[#163d2f] sm:text-3xl">
+          <h2 className="text-2xl font-semibold tracking-[-.035em] text-[#163d2f] sm:text-3xl">
             From cart to campus counter in three easy steps.
           </h2>
           <p className="mt-3 text-xs leading-6 text-[#77827a]">
@@ -598,22 +607,30 @@ function ProductsPage({
             : "Browse school supplies and on-campus services."
         }
       />
-      <div className="mb-5 flex flex-wrap gap-2">
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search products"
-          className="min-w-[220px] flex-1 rounded-md border border-[#d9dfd5] bg-white px-3 py-2.5 text-xs outline-none focus:border-[#184d37]"
-        />
-        {categories.map((c) => (
-          <button
-            key={c}
-            onClick={() => setCategory(c)}
-            className={`rounded-md px-3 py-2 text-[11px] font-semibold ${category === c ? "bg-[#184d37] text-white" : "border border-[#d7ddd3] bg-white text-[#56655d]"}`}
-          >
-            {c}
-          </button>
-        ))}
+      <div className="mb-6">
+        <label className="relative block max-w-[420px]">
+          <Search
+            size={15}
+            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#8b958d]"
+          />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search products"
+            className="w-full rounded-lg border border-[#d9dfd5] bg-white py-2.5 pl-9 pr-3 text-xs outline-none focus:border-[#184d37]"
+          />
+        </label>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {categories.map((c) => (
+            <button
+              key={c}
+              onClick={() => setCategory(c)}
+              className={`rounded-full px-3.5 py-2 text-[11px] font-semibold transition ${category === c ? "bg-[#184d37] text-white shadow-sm" : "border border-[#d7ddd3] bg-white text-[#56655d] hover:border-[#8fa191]"}`}
+            >
+              {c}
+            </button>
+          ))}
+        </div>
       </div>
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {shown.map((p) => (
@@ -727,11 +744,31 @@ function Checkout({
   setPage: (p: string) => void;
 }) {
   const { products } = useProductStore();
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
   const total = products.reduce((s, p) => s + (cart[p.id] || 0) * p.price, 0);
-  const submit = (e: React.FormEvent) => {
+  const defaultPickupDate = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+  const submit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    setCart({});
-    setPage("Confirmation");
+    setSaving(true);
+    setError("");
+    const form = new FormData(e.currentTarget);
+    try {
+      await createOnlineOrder({
+        items: Object.entries(cart)
+          .filter(([, quantity]) => quantity > 0)
+          .map(([productId, quantity]) => ({ productId: Number(productId), quantity })),
+        pickupDate: String(form.get("pickupDate") ?? ""),
+        pickupWindow: String(form.get("pickupWindow") ?? ""),
+        notes: String(form.get("notes") ?? ""),
+      });
+      setCart({});
+      setPage("Confirmation");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "We couldn’t place your order.");
+    } finally {
+      setSaving(false);
+    }
   };
   return (
     <form onSubmit={submit}>
@@ -760,11 +797,11 @@ function Checkout({
             <div className="mt-4 grid gap-4 sm:grid-cols-2">
               <label className="field">
                 Pickup date
-                <input type="date" defaultValue="2025-03-14" required />
+                <input name="pickupDate" type="date" defaultValue={defaultPickupDate} required />
               </label>
               <label className="field">
                 Pickup window
-                <select defaultValue="1:00–3:00 PM">
+                <select name="pickupWindow" defaultValue="1:00–3:00 PM">
                   <option>9:00–11:00 AM</option>
                   <option>1:00–3:00 PM</option>
                   <option>3:00–5:00 PM</option>
@@ -772,7 +809,7 @@ function Checkout({
               </label>
               <label className="field sm:col-span-2">
                 Notes
-                <textarea rows={3} placeholder="Add special instructions (optional)" />
+                <textarea name="notes" rows={3} placeholder="Add special instructions (optional)" />
               </label>
             </div>
           </div>
@@ -795,8 +832,13 @@ function Checkout({
               <span>{peso(total)}</span>
             </div>
           </div>
-          <Button type="submit" className="mt-5 w-full">
-            Place order
+          {error && (
+            <div className="mt-4 rounded-lg border border-[#dfc6bd] bg-[#fbefeb] p-3 text-xs text-[#8b4333]">
+              {error}
+            </div>
+          )}
+          <Button type="submit" disabled={saving} className="mt-5 w-full">
+            {saving ? "Placing order…" : "Place order"}
           </Button>
         </aside>
       </div>
@@ -805,12 +847,29 @@ function Checkout({
 }
 
 function OrdersPage({ setPage }: { setPage: (p: string) => void }) {
+  const [onlineOrders, setOnlineOrders] = useState<OnlineOrder[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    getOrders()
+      .then(setOnlineOrders)
+      .catch((reason) =>
+        setError(reason instanceof Error ? reason.message : "We couldn’t load your orders."),
+      )
+      .finally(() => setLoading(false));
+  }, []);
+
   return (
     <>
       <SectionTitle
         title="My orders"
         subtitle="Track current orders and view your purchase history."
       />
+      {error && (
+        <div className="mb-4 rounded-lg border border-[#dfc6bd] bg-[#fbefeb] p-3 text-xs text-[#8b4333]">
+          {error}
+        </div>
+      )}
       <div className="overflow-hidden rounded-lg border border-[#dde1d8] bg-white">
         <div className="table-wrap">
           <table>
@@ -825,14 +884,29 @@ function OrdersPage({ setPage }: { setPage: (p: string) => void }) {
               </tr>
             </thead>
             <tbody>
-              {orders.map((o) => (
-                <tr key={o.id}>
-                  <td className="font-semibold text-[#1b4635]">{o.id}</td>
-                  <td>{o.date}</td>
-                  <td>{o.items}</td>
-                  <td>{o.total}</td>
+              {onlineOrders.map((order) => (
+                <tr key={order.id}>
+                  <td className="font-semibold text-[#1b4635]">{order.id}</td>
+                  <td>{new Date(order.createdAt).toLocaleDateString()}</td>
+                  <td>{order.items.reduce((sum, item) => sum + item.quantity, 0)} items</td>
+                  <td>{peso(order.total)}</td>
                   <td>
-                    <Pill tone={o.status.includes("Ready") ? "green" : "gray"}>{o.status}</Pill>
+                    <div className="max-w-[210px]">
+                      <Pill
+                        tone={
+                          order.status === "Awaiting restock"
+                            ? "amber"
+                            : order.status === "Ready for pickup" || order.status === "Confirmed"
+                              ? "green"
+                              : "gray"
+                        }
+                      >
+                        {order.status}
+                      </Pill>
+                      <div className="mt-1.5 text-[9px] leading-4 text-[#899189]">
+                        {order.statusMessage}
+                      </div>
+                    </div>
                   </td>
                   <td>
                     <button
@@ -844,10 +918,18 @@ function OrdersPage({ setPage }: { setPage: (p: string) => void }) {
                   </td>
                 </tr>
               ))}
+              {!loading && !onlineOrders.length && (
+                <tr>
+                  <td colSpan={6} className="py-12 text-center text-xs text-[#879087]">
+                    You haven’t placed an online order yet.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
       </div>
+      {loading && <div className="mt-4 text-xs text-[#7d857e]">Loading your orders…</div>}
     </>
   );
 }
@@ -978,22 +1060,60 @@ function Dashboard({ role, setPage }: { role: Role; setPage: (p: string) => void
 }
 
 function PosTerminal() {
-  const { products } = useProductStore();
+  const { products, refreshProducts } = useProductStore();
   const [sale, setSale] = useState<Record<number, number>>({});
-  const [done, setDone] = useState(false);
+  const [result, setResult] = useState<{
+    transaction: { id: string; total: number };
+    impactedOrders: OnlineOrder[];
+  } | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
   const total = products.reduce((s, p) => s + (sale[p.id] || 0) * p.price, 0);
-  if (done)
+  const completeSale = async () => {
+    setSaving(true);
+    setError("");
+    try {
+      const completed = await completeWalkInSale(
+        Object.entries(sale)
+          .filter(([, quantity]) => quantity > 0)
+          .map(([productId, quantity]) => ({ productId: Number(productId), quantity })),
+      );
+      setResult(completed);
+      await refreshProducts();
+    } catch (reason) {
+      setError(
+        reason instanceof Error ? reason.message : "The transaction could not be completed.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+  if (result)
     return (
       <div className="mx-auto max-w-xl rounded-lg border border-[#dce1d7] bg-white p-10 text-center">
-        <span className="mx-auto grid size-12 place-items-center rounded-full bg-[#dce9de] text-xl text-[#174733]">
-          ✓
+        <span className="mx-auto grid size-12 place-items-center rounded-full bg-[#dce9de] text-[#174733]">
+          <CheckCircle2 size={22} />
         </span>
         <h1 className="mt-5 text-2xl font-semibold text-[#173d2f]">Transaction completed</h1>
-        <p className="mt-2 text-xs text-[#78827a]">Receipt TX-0087 · Total {peso(total)}</p>
+        <p className="mt-2 text-xs text-[#78827a]">
+          Receipt {result.transaction.id} · Total {peso(result.transaction.total)}
+        </p>
+        {result.impactedOrders.length > 0 && (
+          <div className="mt-6 rounded-xl border border-[#e1d4a7] bg-[#faf5df] p-4 text-left">
+            <div className="flex items-center gap-2 text-xs font-semibold text-[#67581c]">
+              <AlertTriangle size={16} /> {result.impactedOrders.length} online order
+              {result.impactedOrders.length > 1 ? "s need" : " needs"} attention
+            </div>
+            <p className="mt-2 text-[10px] leading-5 text-[#7a6d39]">
+              Walk-in inventory was prioritized. Affected online orders were automatically moved to
+              “Awaiting restock” and are visible in Order management.
+            </p>
+          </div>
+        )}
         <Button
           className="mt-6"
           onClick={() => {
-            setDone(false);
+            setResult(null);
             setSale({});
           }}
         >
@@ -1044,10 +1164,157 @@ function PosTerminal() {
             <span>Total</span>
             <span>{peso(total)}</span>
           </div>
-          <Button disabled={!total} className="mt-5 w-full" onClick={() => setDone(true)}>
-            Complete transaction
+          {error && (
+            <div className="mt-4 rounded-lg border border-[#dfc6bd] bg-[#fbefeb] p-3 text-xs text-[#8b4333]">
+              {error}
+            </div>
+          )}
+          <Button disabled={!total || saving} className="mt-5 w-full" onClick={completeSale}>
+            {saving ? "Processing…" : "Complete walk-in sale"}
           </Button>
         </aside>
+      </div>
+    </>
+  );
+}
+
+function OrderManagementPage() {
+  const { refreshProducts } = useProductStore();
+  const [onlineOrders, setOnlineOrders] = useState<OnlineOrder[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const loadOrders = async () => {
+    setLoading(true);
+    try {
+      setOnlineOrders(await getOrders());
+      setError("");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Orders could not be loaded.");
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => {
+    void loadOrders();
+  }, []);
+  const conflicts = onlineOrders.filter((order) => order.status === "Awaiting restock");
+  const changeStatus = async (order: OnlineOrder, status: OrderStatus) => {
+    try {
+      const message =
+        status === "Cancelled"
+          ? "This order was cancelled because stock could not be secured."
+          : status === "Ready for pickup"
+            ? "Your order is prepared and ready at the Business Center counter."
+            : status === "Confirmed"
+              ? "Restocked inventory is now allocated to this order."
+              : order.statusMessage;
+      const updated = await updateOrderStatus(order.id, status, message);
+      setOnlineOrders((current) =>
+        current.map((candidate) => (candidate.id === updated.id ? updated : candidate)),
+      );
+      if (status === "Ready for pickup") await refreshProducts();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "The order could not be updated.");
+    }
+  };
+
+  return (
+    <>
+      <SectionTitle
+        title="Order management"
+        subtitle="Review online orders and resolve stock conflicts created by counter sales."
+        action={
+          <Button kind="secondary" onClick={loadOrders}>
+            Refresh orders
+          </Button>
+        }
+      />
+      {conflicts.length > 0 && (
+        <div className="mb-5 rounded-xl border border-[#ded09c] bg-[#faf5df] p-4 sm:flex sm:items-center sm:justify-between">
+          <div className="flex items-start gap-3">
+            <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-[#eadfae] text-[#66591e]">
+              <AlertTriangle size={17} />
+            </span>
+            <div>
+              <div className="text-xs font-semibold text-[#5f531e]">
+                {conflicts.length} stock conflict{conflicts.length > 1 ? "s" : ""} need review
+              </div>
+              <p className="mt-1 text-[10px] leading-5 text-[#7a6e3b]">
+                Walk-in sales were fulfilled first. Contact students or wait for restock before
+                confirming these orders.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+      {error && (
+        <div className="mb-4 rounded-lg border border-[#dfc6bd] bg-[#fbefeb] p-3 text-xs text-[#8b4333]">
+          {error}
+        </div>
+      )}
+      <div className="space-y-3">
+        {onlineOrders.map((order) => (
+          <article
+            key={order.id}
+            className={`rounded-xl border bg-white p-5 shadow-sm ${order.status === "Awaiting restock" ? "border-[#ded09c]" : "border-[#dce1d7]"}`}
+          >
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <div className="text-xs font-semibold text-[#1b4635]">{order.id}</div>
+                <div className="mt-1 text-[10px] text-[#879087]">
+                  {order.customerName} · {new Date(order.createdAt).toLocaleString()}
+                </div>
+              </div>
+              <Pill
+                tone={
+                  order.status === "Awaiting restock"
+                    ? "amber"
+                    : order.status === "Confirmed" || order.status === "Ready for pickup"
+                      ? "green"
+                      : "gray"
+                }
+              >
+                {order.status}
+              </Pill>
+            </div>
+            <div className="mt-4 grid gap-4 md:grid-cols-[1fr_220px]">
+              <div>
+                <div className="text-xs text-[#58665e]">
+                  {order.items.map((item) => `${item.quantity}× ${item.name}`).join(" · ")}
+                </div>
+                <div className="mt-2 text-[10px] leading-5 text-[#879087]">
+                  {order.statusMessage}
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                {order.status === "Awaiting restock" && (
+                  <>
+                    <Button kind="secondary" onClick={() => changeStatus(order, "Confirmed")}>
+                      Allocate restock
+                    </Button>
+                    <button
+                      onClick={() => changeStatus(order, "Cancelled")}
+                      className="flex items-center gap-1.5 rounded-md px-3 py-2 text-[10px] font-semibold text-[#8a493e] hover:bg-[#fbefeb]"
+                    >
+                      <XCircle size={13} /> Cancel
+                    </button>
+                  </>
+                )}
+                {order.status === "Confirmed" && (
+                  <Button onClick={() => changeStatus(order, "Ready for pickup")}>
+                    Mark ready
+                  </Button>
+                )}
+              </div>
+            </div>
+          </article>
+        ))}
+        {!loading && !onlineOrders.length && (
+          <div className="rounded-xl border border-dashed border-[#ccd4ca] bg-white/50 py-14 text-center text-xs text-[#7e8881]">
+            No online orders yet.
+          </div>
+        )}
+        {loading && <div className="py-8 text-center text-xs text-[#7e8881]">Loading orders…</div>}
       </div>
     </>
   );
@@ -1245,7 +1512,7 @@ function ManagementPage({ page }: { page: string }) {
         <div className="border-b border-[#e1e5dd] p-4 flex flex-wrap gap-2">
           <input
             placeholder={`Search ${isUser ? "users" : isProduct || isInventory ? "products" : "transactions"}`}
-            className="min-w-[220px] flex-1 rounded-md border border-[#d8ddd4] px-3 py-2 text-xs outline-none"
+            className="w-full max-w-[360px] rounded-md border border-[#d8ddd4] px-3 py-2 text-xs outline-none"
           />
           <select className="rounded-md border border-[#d8ddd4] bg-white px-3 py-2 text-xs">
             <option>All categories</option>
@@ -1498,14 +1765,44 @@ export default function App() {
               }
             />
             <div className="rounded-lg border border-[#dce1d7] bg-white p-6">
-              <h2 className="text-sm font-semibold">Order status: Ready for pickup</h2>
-              <div className="mt-6 grid gap-3 sm:grid-cols-4">
-                {["Order placed", "Preparing", "Ready for pickup", "Completed"].map((s, i) => (
-                  <div key={s}>
-                    <div className={`h-1 rounded ${i < 3 ? "bg-[#184d37]" : "bg-[#dfe4dc]"}`} />
-                    <div className="mt-2 text-[10px] font-semibold text-[#557064]">{s}</div>
-                  </div>
-                ))}
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-sm font-semibold">Ready for pickup</h2>
+                  <p className="mt-1 text-[10px] text-[#7a857e]">
+                    Your order is prepared at the Business Center counter.
+                  </p>
+                </div>
+                <Pill>Current status</Pill>
+              </div>
+              <div className="mt-8 grid gap-4 sm:grid-cols-4">
+                {[
+                  ["Order placed", ClipboardList],
+                  ["Preparing", Package],
+                  ["Ready for pickup", PackageCheck],
+                  ["Completed", CheckCircle2],
+                ].map(([label, Icon], index) => {
+                  const complete = index < 3;
+                  const current = index === 2;
+                  const StageIcon = Icon as LucideIcon;
+                  return (
+                    <div
+                      key={label as string}
+                      className={`relative rounded-xl border p-4 ${current ? "border-[#8eaa94] bg-[#edf4eb]" : "border-[#e0e4dc] bg-[#f9faf6]"}`}
+                    >
+                      <div
+                        className={`grid size-9 place-items-center rounded-full ${complete ? "bg-[#184d37] text-white" : "bg-[#e4e8e1] text-[#8b958d]"}`}
+                      >
+                        <StageIcon size={16} />
+                      </div>
+                      <div className="mt-3 text-[11px] font-semibold text-[#355346]">
+                        {label as string}
+                      </div>
+                      <div className="mt-1 text-[9px] text-[#8b938d]">
+                        {current ? "Ready now" : complete ? "Completed" : "Next step"}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
               <div className="mt-8 grid gap-4 md:grid-cols-2">
                 <div className="rounded-md bg-[#f5f6f0] p-4 text-xs leading-6">
@@ -1528,6 +1825,7 @@ export default function App() {
     }
     if (page === "Dashboard") return <Dashboard role={role} setPage={setPage} />;
     if (role === "staff" && page === "POS terminal") return <PosTerminal />;
+    if (role === "staff" && page === "Order management") return <OrderManagementPage />;
     return <ManagementPage page={page} />;
   })();
 
@@ -1543,11 +1841,9 @@ export default function App() {
         />
         <div className="mx-auto flex min-h-[calc(100vh-72px)] max-w-[1500px]">
           <Sidebar role={role} page={page} setPage={setPage} />
-          <div className="flex min-w-0 flex-1 flex-col">
-            <main className="min-w-0 flex-1 p-4 sm:p-7 lg:p-9">{content}</main>
-            {role === "student" && <Footer setPage={setPage} />}
-          </div>
+          <main className="min-w-0 flex-1 p-4 sm:p-7 lg:p-9">{content}</main>
         </div>
+        {role === "student" && <Footer setPage={setPage} />}
         {toast && (
           <div className="fixed bottom-5 right-5 z-50 rounded-md bg-[#173f30] px-4 py-3 text-xs font-semibold text-white shadow-xl">
             {toast}
