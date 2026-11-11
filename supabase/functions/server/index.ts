@@ -5,7 +5,8 @@ import { logger } from "npm:hono/logger";
 import * as kv from "./kv_store.tsx";
 
 const app = new Hono();
-const prefix = "/make-server-2e4384b4";
+// Supabase includes the deployed function slug in req.url.pathname.
+const prefix = "/server/make-server-2e4384b4";
 
 app.use("*", logger(console.log));
 app.use(
