@@ -1,0 +1,10 @@
+{
+  "description": "A polished prototype website frontend that helps teams showcase ideas, products, or services through an engaging, responsive digital experience.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
