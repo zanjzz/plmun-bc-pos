@@ -346,6 +346,44 @@ async function recordStatus(
   return data;
 }
 
+async function ensureOnlineTransaction(order: any, actor: any) {
+  const client = adminClient();
+  const { data: existing, error: existingError } = await client
+    .from("transactions")
+    .select("*")
+    .eq("order_id", order.id)
+    .maybeSingle();
+  if (existingError) throw existingError;
+  if (existing) return existing;
+
+  const { data: transaction, error } = await client
+    .from("transactions")
+    .insert({
+      transaction_number: `ONL-${order.order_number}`,
+      source: "online",
+      staff_id: ["staff", "admin"].includes(actor.profile.role) ? actor.profile.id : null,
+      order_id: order.id,
+      total: Number(order.total),
+    })
+    .select()
+    .single();
+  if (error) throw error;
+  const { error: itemError } = await client.from("transaction_items").insert(
+    order.order_items.map((item: any) => ({
+      transaction_id: transaction.id,
+      product_id: item.product_id,
+      product_name: item.product_name,
+      quantity: Number(item.quantity),
+      unit_price: Number(item.unit_price),
+    })),
+  );
+  if (itemError) {
+    await client.from("transactions").delete().eq("id", transaction.id);
+    throw itemError;
+  }
+  return transaction;
+}
+
 async function reconcileOnlineOrders() {
   const client = adminClient();
   const { data: products, error: productsError } = await client
@@ -561,7 +599,7 @@ app.get(`${prefix}/users`, async (c) => {
     .from("profiles")
     .select("*")
     .order("created_at", { ascending: false });
-  if (error) return c.json({ error: error.message }, 500);
+  if (error) return c.json({ error: "Accounts could not be loaded. Please try again." }, 500);
   return c.json({ users: data });
 });
 
@@ -588,7 +626,14 @@ app.post(`${prefix}/users`, async (c) => {
     user_metadata: { name: fullName, role, reference: String(input.reference ?? "") },
   });
   if (error || !data.user)
-    return c.json({ error: error?.message ?? "Unable to create user." }, 400);
+    return c.json(
+      {
+        error: error?.message.toLowerCase().includes("already")
+          ? "An account with this email already exists."
+          : "The account could not be created. Check the details and try again.",
+      },
+      400,
+    );
   const { data: profile, error: profileError } = await adminClient()
     .from("profiles")
     .upsert({
@@ -601,7 +646,8 @@ app.post(`${prefix}/users`, async (c) => {
     })
     .select()
     .single();
-  if (profileError) return c.json({ error: profileError.message }, 500);
+  if (profileError)
+    return c.json({ error: "The account profile could not be saved. Please try again." }, 500);
   return c.json({ user: profile }, 201);
 });
 
@@ -641,14 +687,15 @@ app.put(`${prefix}/users/:id`, async (c) => {
     authUpdates.password = String(input.password);
   }
   const { error: authError } = await adminClient().auth.admin.updateUserById(id, authUpdates);
-  if (authError) return c.json({ error: authError.message }, 400);
+  if (authError)
+    return c.json({ error: "The sign-in details could not be updated. Please try again." }, 400);
   const { data, error } = await adminClient()
     .from("profiles")
     .update({ email, full_name: fullName, role, reference, active })
     .eq("id", id)
     .select()
     .single();
-  if (error) return c.json({ error: error.message }, 400);
+  if (error) return c.json({ error: "The account could not be updated. Please try again." }, 400);
   return c.json({ user: data });
 });
 
@@ -662,14 +709,16 @@ app.delete(`${prefix}/users/:id`, async (c) => {
   const { error: authError } = await adminClient().auth.admin.updateUserById(id, {
     ban_duration: "876000h",
   });
-  if (authError) return c.json({ error: authError.message }, 400);
+  if (authError)
+    return c.json({ error: "Account access could not be removed. Please try again." }, 400);
   const { data, error } = await adminClient()
     .from("profiles")
     .update({ active: false })
     .eq("id", id)
     .select()
     .single();
-  if (error) return c.json({ error: error.message }, 400);
+  if (error)
+    return c.json({ error: "Account access could not be updated. Please try again." }, 400);
   return c.json({ user: data, removed: true });
 });
 
@@ -699,7 +748,7 @@ app.post(`${prefix}/products`, async (c) => {
     })
     .select()
     .single();
-  if (error) return c.json({ error: error.message }, 400);
+  if (error) return c.json({ error: "The product could not be saved. Check the details." }, 400);
   await notifyInventoryLevel(
     toProduct(data),
     Number(data.stock),
@@ -727,7 +776,7 @@ app.put(`${prefix}/products/:id`, async (c) => {
     .eq("id", id)
     .select()
     .single();
-  if (error) return c.json({ error: error.message }, 400);
+  if (error) return c.json({ error: "The product could not be updated. Please try again." }, 400);
   if (previous && Number(previous.stock) !== Number(data.stock)) {
     await adminClient()
       .from("inventory_movements")
@@ -756,7 +805,7 @@ app.delete(`${prefix}/products/:id`, async (c) => {
   const { data: product } = await adminClient().from("products").select("*").eq("id", id).single();
   if (!product?.active) return c.json({ deleted: true });
   const { error } = await adminClient().from("products").update({ active: false }).eq("id", id);
-  if (error) return c.json({ error: error.message }, 400);
+  if (error) return c.json({ error: "The product could not be removed. Please try again." }, 400);
   await notifyRoles(["staff"], {
     eventKey: `product:${id}:deactivated:staff`,
     type: "inventory",
@@ -794,9 +843,72 @@ app.get(`${prefix}/orders`, async (c) => {
   return c.json({ orders: data.map(toOrder) });
 });
 
+app.get(`${prefix}/admin/reports`, async (c) => {
+  const auth = await requireRole(c, ["admin"]);
+  if (auth.response) return auth.response;
+  const client = adminClient();
+  const [
+    { data: transactions, error: transactionError },
+    { data: movements, error: movementError },
+  ] = await Promise.all([
+    client
+      .from("transactions")
+      .select("*, transaction_items(*)")
+      .order("created_at", { ascending: false })
+      .limit(100),
+    client
+      .from("inventory_movements")
+      .select("*, products(name)")
+      .order("created_at", { ascending: false })
+      .limit(100),
+  ]);
+  if (transactionError || movementError) {
+    return c.json({ error: "Reports could not be loaded. Please try again." }, 500);
+  }
+  const totalSales = transactions.reduce(
+    (sum: number, transaction: any) => sum + Number(transaction.total),
+    0,
+  );
+  return c.json({
+    summary: {
+      totalSales,
+      transactionCount: transactions.length,
+      walkInSales: transactions
+        .filter((transaction: any) => transaction.source === "walk-in")
+        .reduce((sum: number, transaction: any) => sum + Number(transaction.total), 0),
+      onlineSales: transactions
+        .filter((transaction: any) => transaction.source === "online")
+        .reduce((sum: number, transaction: any) => sum + Number(transaction.total), 0),
+    },
+    transactions: transactions.map((transaction: any) => ({
+      id: transaction.transaction_number,
+      source: transaction.source,
+      total: Number(transaction.total),
+      itemCount: (transaction.transaction_items ?? []).reduce(
+        (sum: number, item: any) => sum + Number(item.quantity),
+        0,
+      ),
+      orderId: transaction.order_id,
+      createdAt: transaction.created_at,
+    })),
+    inventoryMovements: movements.map((movement: any) => ({
+      id: movement.id,
+      productName: movement.products?.name ?? "Product",
+      type: movement.movement_type,
+      quantityChange: Number(movement.quantity_change),
+      stockAfter: Number(movement.stock_after),
+      reference: movement.reference_id,
+      createdAt: movement.created_at,
+    })),
+  });
+});
+
 app.post(`${prefix}/orders`, async (c) => {
   const auth = await authenticatedContext(c);
   if (!auth) return c.json({ error: "Authentication required." }, 401);
+  if (auth.profile.role !== "student") {
+    return c.json({ error: "Only student accounts can place online orders." }, 403);
+  }
   const input = await c.req.json();
   const productIds = (input.items ?? []).map((item: any) => Number(item.productId));
   const { data: products, error: productError } = await adminClient()
@@ -879,12 +991,36 @@ app.post(`${prefix}/orders`, async (c) => {
 });
 
 app.put(`${prefix}/orders/:id/status`, async (c) => {
-  const auth = await requireRole(c, ["staff", "admin"]);
-  if (auth.response) return auth.response;
+  const auth = await authenticatedContext(c);
+  if (!auth) return c.json({ error: "Your session has expired. Please sign in again." }, 401);
   const order = await fetchOrderByNumber(c.req.param("id"));
   const { status, message } = await c.req.json();
   const allowed = ["Confirmed", "Awaiting restock", "Ready for pickup", "Completed", "Cancelled"];
   if (!allowed.includes(status)) return c.json({ error: "Invalid order status." }, 400);
+  const isStudent = auth.profile.role === "student";
+  if (isStudent && order.user_id !== auth.user.id) {
+    return c.json({ error: "You can only update your own orders." }, 403);
+  }
+  if (isStudent && status !== "Completed") {
+    return c.json({ error: "Students can only confirm that an order was received." }, 403);
+  }
+  if (status === "Completed" && order.status === "Completed") {
+    await ensureOnlineTransaction(order, auth);
+    return c.json({ order: toOrder(order) });
+  }
+  const validTransitions: Record<string, string[]> = {
+    Confirmed: ["Pending review", "Awaiting restock"],
+    "Awaiting restock": ["Pending review", "Confirmed"],
+    "Ready for pickup": ["Confirmed"],
+    Completed: ["Ready for pickup"],
+    Cancelled: ["Pending review", "Confirmed", "Awaiting restock"],
+  };
+  if (!validTransitions[status]?.includes(order.status)) {
+    return c.json(
+      { error: `${order.order_number} cannot move from ${order.status} to ${status}.` },
+      409,
+    );
+  }
 
   if (status === "Confirmed" && order.status === "Awaiting restock") {
     await reconcileOnlineOrders();
@@ -943,6 +1079,9 @@ app.put(`${prefix}/orders/:id/status`, async (c) => {
     statusMessage,
     auth.profile.id,
   );
+  if (status === "Completed") {
+    await ensureOnlineTransaction(order, auth);
+  }
   await notifyOrderStatus({ ...order, status, status_message: statusMessage }, history.id);
   if (["Cancelled", "Completed", "Ready for pickup"].includes(status)) {
     await reconcileOnlineOrders();
@@ -1031,7 +1170,7 @@ app.post(`${prefix}/pos/checkout`, async (c) => {
       type: "transaction",
       title: "Walk-in transaction completed",
       message: `${transactionNumber} was completed for ₱${total.toFixed(2)}.`,
-      actionPage: "Transaction history",
+      actionPage: "Reports & transactions",
       entityType: "transaction",
       entityId: transactionNumber,
     });

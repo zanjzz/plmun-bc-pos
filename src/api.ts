@@ -51,7 +51,7 @@ export async function apiRequest<T>(
   if (!response.ok) {
     if (response.status === 404) {
       throw new Error(
-        "Account services aren’t available yet. The Supabase server function still needs to be deployed.",
+        "This service is not available yet. Please contact the system administrator.",
       );
     }
     if (response.status === 401) {

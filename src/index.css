@@ -697,6 +697,14 @@ html[data-theme="dark"] body::before {
     overflow-x: auto;
   }
 
+  @media (min-width: 768px) {
+    .table-wrap th {
+      position: sticky;
+      z-index: 2;
+      top: 0;
+    }
+  }
+
   table {
     width: 100%;
     min-width: 650px;

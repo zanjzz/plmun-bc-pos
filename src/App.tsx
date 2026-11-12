@@ -10,8 +10,6 @@ import {
   CheckCircle2,
   ClipboardList,
   Clock3,
-  FileText,
-  History,
   Home,
   LayoutDashboard,
   LogOut,
@@ -24,6 +22,7 @@ import {
   PackageCheck,
   Printer,
   Plus,
+  RefreshCw,
   RotateCcw,
   Save,
   ScanLine,
@@ -70,6 +69,7 @@ import {
   type Product,
   updateProduct,
 } from "./products";
+import { type AdminReportData, getAdminReports } from "./reports";
 import { createUser, getUsers, type ManagedUser, removeUser, updateUser } from "./users";
 
 type ProductStore = {
@@ -96,7 +96,7 @@ function ProductDataProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     getProducts()
       .then(setProducts)
-      .catch((error) => console.error("Unable to load Supabase products:", error))
+      .catch((error) => console.error("Unable to load products:", error))
       .finally(() => setLoading(false));
   }, []);
 
@@ -123,19 +123,6 @@ function ProductDataProvider({ children }: { children: React.ReactNode }) {
   return <ProductContext.Provider value={store}>{children}</ProductContext.Provider>;
 }
 
-const orders = [
-  {
-    id: "ORD-1042",
-    date: "Mar 12, 2025",
-    items: "2 items",
-    total: "₱70.00",
-    status: "Ready for pickup",
-  },
-  { id: "ORD-1038", date: "Mar 08, 2025", items: "4 items", total: "₱155.00", status: "Completed" },
-  { id: "ORD-1029", date: "Feb 24, 2025", items: "1 item", total: "₱45.00", status: "Completed" },
-  { id: "ORD-1017", date: "Feb 16, 2025", items: "3 items", total: "₱110.00", status: "Completed" },
-];
-
 const navByRole: Record<Role, string[]> = {
   student: ["Home", "Products", "Services", "My orders"],
   staff: ["Dashboard", "POS terminal", "Order management"],
@@ -143,9 +130,7 @@ const navByRole: Record<Role, string[]> = {
     "Dashboard",
     "Product management",
     "Inventory management",
-    "Sales reports",
-    "Inventory reports",
-    "Transaction history",
+    "Reports & transactions",
     "User management",
   ],
 };
@@ -160,9 +145,7 @@ const navIcons: Record<string, LucideIcon> = {
   "Order management": ClipboardList,
   "Product management": Package,
   "Inventory management": Boxes,
-  "Sales reports": BarChart3,
-  "Inventory reports": FileText,
-  "Transaction history": History,
+  "Reports & transactions": BarChart3,
   "User management": Users,
 };
 
@@ -176,9 +159,7 @@ const navSearchKeywords: Record<string, string> = {
   "Order management": "online orders conflicts review pickup",
   "Product management": "products prices catalog availability",
   "Inventory management": "inventory stock restock availability",
-  "Sales reports": "sales revenue performance",
-  "Inventory reports": "stock inventory report",
-  "Transaction history": "transactions receipts history",
+  "Reports & transactions": "sales revenue inventory transactions receipts history",
   "User management": "users accounts roles access",
 };
 
@@ -210,6 +191,14 @@ const notificationTime = (value: string) => {
   return days < 7 ? `${days}d ago` : new Date(value).toLocaleDateString();
 };
 
+const localDateKey = (value: string) => {
+  const date = new Date(value);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
 function NotificationCenter({
   user,
   setPage,
@@ -224,7 +213,15 @@ function NotificationCenter({
   const [error, setError] = useState("");
   const [urgent, setUrgent] = useState<AppNotification | null>(null);
   const [suppressUrgent, setSuppressUrgent] = useState(false);
-  const urgentPreferenceKey = `plmun-hide-urgent-notifications-${user.id}`;
+  const urgentShownKey = `plmun-urgent-shown-${user.id}`;
+  const dismissedUrgentKey = `plmun-dismissed-urgent-${user.id}`;
+  const getDismissedUrgentIds = () => {
+    try {
+      return JSON.parse(window.localStorage.getItem(dismissedUrgentKey) ?? "[]") as string[];
+    } catch {
+      return [];
+    }
+  };
 
   useEffect(() => {
     let active = true;
@@ -235,12 +232,19 @@ function NotificationCenter({
         setNotifications(result.notifications);
         setUnreadCount(result.unreadCount);
         setError("");
-        const urgentPopupsDisabled = window.localStorage.getItem(urgentPreferenceKey) === "true";
-        if (!urgentPopupsDisabled) {
+        const popupAlreadyShown = window.sessionStorage.getItem(urgentShownKey) === "true";
+        if (user.role === "student" && !popupAlreadyShown) {
+          const dismissedIds = getDismissedUrgentIds();
           const nextUrgent = result.notifications.find(
-            (notification) => !notification.readAt && notification.metadata.urgent === true,
+            (notification) =>
+              !notification.readAt &&
+              notification.metadata.urgent === true &&
+              !dismissedIds.includes(notification.id),
           );
-          setUrgent((current) => current ?? nextUrgent ?? null);
+          if (nextUrgent) {
+            window.sessionStorage.setItem(urgentShownKey, "true");
+            setUrgent((current) => current ?? nextUrgent);
+          }
         }
       } catch (reason) {
         if (active) {
@@ -261,7 +265,7 @@ function NotificationCenter({
       window.removeEventListener("notifications:refresh", refresh);
       window.removeEventListener("focus", refresh);
     };
-  }, [urgentPreferenceKey]);
+  }, [dismissedUrgentKey, urgentShownKey, user.role]);
 
   const readNotification = async (notification: AppNotification, navigate = true) => {
     if (!notification.readAt) {
@@ -283,16 +287,24 @@ function NotificationCenter({
   const dismissUrgent = async () => {
     if (!urgent) return;
     if (suppressUrgent) {
-      window.localStorage.setItem(urgentPreferenceKey, "true");
+      const dismissedIds = getDismissedUrgentIds();
+      window.localStorage.setItem(
+        dismissedUrgentKey,
+        JSON.stringify([...new Set([...dismissedIds, urgent.id])]),
+      );
     }
-    await readNotification(urgent, false);
+    setUrgent(null);
     setSuppressUrgent(false);
   };
 
   const reviewUrgent = async () => {
     if (!urgent) return;
     if (suppressUrgent) {
-      window.localStorage.setItem(urgentPreferenceKey, "true");
+      const dismissedIds = getDismissedUrgentIds();
+      window.localStorage.setItem(
+        dismissedUrgentKey,
+        JSON.stringify([...new Set([...dismissedIds, urgent.id])]),
+      );
     }
     await readNotification(urgent);
     setSuppressUrgent(false);
@@ -313,7 +325,10 @@ function NotificationCenter({
   };
 
   const notificationIcon = (notification: AppNotification) => {
-    if (notification.type === "inventory") return <Boxes size={16} className="icon-warning" />;
+    if (notification.type === "inventory") {
+      const isOutOfStock = Number(notification.metadata.stock) <= 0;
+      return <Boxes size={16} className={isOutOfStock ? "icon-danger" : "icon-warning"} />;
+    }
     if (notification.type === "transaction")
       return <ShoppingCart size={16} className="icon-info" />;
     if (notification.type === "order") return <PackageCheck size={16} className="icon-success" />;
@@ -453,7 +468,7 @@ function NotificationCenter({
                   onChange={(event) => setSuppressUrgent(event.target.checked)}
                   className="size-4 accent-[#184d37]"
                 />
-                Don’t show urgent popups again
+                Don’t remind me again.
               </label>
               <div className="mt-5 flex flex-col gap-2 sm:flex-row-reverse">
                 <Button className="w-full sm:flex-1" onClick={reviewUrgent}>
@@ -519,6 +534,147 @@ function Button({
     >
       {children}
     </button>
+  );
+}
+
+type FeedbackTone = "success" | "error" | "info";
+
+function FeedbackToast({
+  message,
+  tone = "success",
+  onClose,
+}: {
+  message: string;
+  tone?: FeedbackTone;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const timeout = window.setTimeout(onClose, 4500);
+    return () => window.clearTimeout(timeout);
+  }, [message, onClose]);
+
+  const Icon = tone === "success" ? CheckCircle2 : tone === "error" ? XCircle : Bell;
+  return createPortal(
+    <div
+      role={tone === "error" ? "alert" : "status"}
+      aria-live={tone === "error" ? "assertive" : "polite"}
+      className={`fixed bottom-5 right-4 z-[150] flex w-[min(420px,calc(100vw-2rem))] items-start gap-3 rounded-xl border bg-white p-4 shadow-[0_20px_60px_rgba(18,43,31,.25)] sm:bottom-6 sm:right-6 ${
+        tone === "error"
+          ? "border-[#dfb9b0]"
+          : tone === "success"
+            ? "border-[#bfd1c0]"
+            : "border-[#c7d4d9]"
+      }`}
+    >
+      <span
+        className={`grid size-9 shrink-0 place-items-center rounded-lg ${
+          tone === "error" ? "bg-[#fbefeb]" : tone === "success" ? "bg-[#eaf2e8]" : "bg-[#eaf1f4]"
+        }`}
+      >
+        <Icon
+          size={17}
+          className={
+            tone === "error" ? "icon-danger" : tone === "success" ? "icon-success" : "icon-info"
+          }
+        />
+      </span>
+      <p className="min-w-0 flex-1 pt-1 text-xs font-medium leading-5 text-[#385044]">{message}</p>
+      <button
+        type="button"
+        onClick={onClose}
+        className="grid size-8 shrink-0 place-items-center rounded-lg text-[#718078] hover:bg-[#edf1ec]"
+        aria-label="Dismiss message"
+      >
+        <X size={15} />
+      </button>
+    </div>,
+    document.body,
+  );
+}
+
+type ConfirmationConfig = {
+  title: string;
+  message: string;
+  confirmLabel: string;
+  destructive?: boolean;
+  onConfirm: () => void | Promise<void>;
+};
+
+function ConfirmationDialog({
+  config,
+  busy = false,
+  onClose,
+}: {
+  config: ConfirmationConfig | null;
+  busy?: boolean;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    if (!config) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !busy) onClose();
+    };
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.body.style.overflow = previous;
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [busy, config, onClose]);
+
+  if (!config) return null;
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[140] grid place-items-center bg-[#0b0d0e]/65 p-4 backdrop-blur-sm"
+      onMouseDown={() => !busy && onClose()}
+    >
+      <section
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="confirmation-dialog-title"
+        aria-describedby="confirmation-dialog-description"
+        className="w-full max-w-md rounded-2xl border border-white/20 bg-white p-6 shadow-[0_30px_100px_rgba(0,0,0,.4)]"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <span
+          className={`grid size-11 place-items-center rounded-xl ${
+            config.destructive ? "bg-[#fbefeb]" : "bg-[#eaf2e8]"
+          }`}
+        >
+          {config.destructive ? (
+            <AlertTriangle size={20} className="icon-danger" />
+          ) : (
+            <CheckCircle2 size={20} className="icon-success" />
+          )}
+        </span>
+        <h2 id="confirmation-dialog-title" className="mt-4 text-xl font-semibold text-[#253f33]">
+          {config.title}
+        </h2>
+        <p id="confirmation-dialog-description" className="mt-2 text-sm leading-6 text-[#5f6d65]">
+          {config.message}
+        </p>
+        <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <Button kind="secondary" onClick={onClose} disabled={busy} className="w-full sm:w-auto">
+            Cancel
+          </Button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void config.onConfirm()}
+            autoFocus
+            className={`inline-flex min-h-11 w-full items-center justify-center rounded-lg px-4 py-2.5 text-xs font-semibold text-white transition disabled:opacity-50 sm:w-auto ${
+              config.destructive
+                ? "bg-[#98483b] hover:bg-[#7e382e]"
+                : "bg-[#184d37] hover:bg-[#103d2b]"
+            }`}
+          >
+            {busy ? "Please wait…" : config.confirmLabel}
+          </button>
+        </div>
+      </section>
+    </div>,
+    document.body,
   );
 }
 
@@ -1271,10 +1427,14 @@ function Checkout({
   cart,
   setCart,
   setPage,
+  user,
+  onOrderCreated,
 }: {
   cart: Record<number, number>;
   setCart: React.Dispatch<React.SetStateAction<Record<number, number>>>;
   setPage: (p: string) => void;
+  user: AuthUser;
+  onOrderCreated: (order: OnlineOrder) => void;
 }) {
   const { products } = useProductStore();
   const [saving, setSaving] = useState(false);
@@ -1287,7 +1447,7 @@ function Checkout({
     setError("");
     const form = new FormData(e.currentTarget);
     try {
-      await createOnlineOrder({
+      const order = await createOnlineOrder({
         items: Object.entries(cart)
           .filter(([, quantity]) => quantity > 0)
           .map(([productId, quantity]) => ({ productId: Number(productId), quantity })),
@@ -1295,6 +1455,7 @@ function Checkout({
         pickupWindow: String(form.get("pickupWindow") ?? ""),
         notes: String(form.get("notes") ?? ""),
       });
+      onOrderCreated(order);
       setCart({});
       setPage("Confirmation");
     } catch (reason) {
@@ -1313,15 +1474,15 @@ function Checkout({
             <div className="mt-4 grid gap-4 sm:grid-cols-2">
               <label className="field">
                 Full name
-                <input defaultValue="Alex Rivera" required />
+                <input value={user.name} readOnly />
               </label>
               <label className="field">
                 Student ID
-                <input defaultValue="2025-00142" required />
+                <input value={user.reference} readOnly />
               </label>
               <label className="field sm:col-span-2">
                 Email address
-                <input type="email" defaultValue="alex.rivera@plmun.edu.ph" required />
+                <input type="email" value={user.email} readOnly />
               </label>
             </div>
           </div>
@@ -1383,6 +1544,12 @@ function OrdersPage({ setPage }: { setPage: (p: string) => void }) {
   const [onlineOrders, setOnlineOrders] = useState<OnlineOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("All");
+  const [dateFilter, setDateFilter] = useState("");
+  const [confirmation, setConfirmation] = useState<ConfirmationConfig | null>(null);
+  const [updating, setUpdating] = useState(false);
+  const [feedback, setFeedback] = useState<{ message: string; tone: FeedbackTone } | null>(null);
   useEffect(() => {
     getOrders()
       .then(setOnlineOrders)
@@ -1391,6 +1558,58 @@ function OrdersPage({ setPage }: { setPage: (p: string) => void }) {
       )
       .finally(() => setLoading(false));
   }, []);
+  const filteredOrders = onlineOrders.filter((order) => {
+    const search = query.trim().toLowerCase();
+    const resolved = order.status === "Completed" || order.status === "Cancelled";
+    const searchable = `${order.id} ${order.status} ${order.items
+      .map((item) => item.name)
+      .join(" ")}`.toLowerCase();
+    return (
+      (!search || searchable.includes(search)) &&
+      (statusFilter === "All" || order.status === statusFilter) &&
+      (!dateFilter || localDateKey(resolved ? order.updatedAt : order.createdAt) === dateFilter)
+    );
+  });
+  const activeOrders = filteredOrders.filter(
+    (order) => order.status !== "Completed" && order.status !== "Cancelled",
+  );
+  const orderHistory = filteredOrders.filter(
+    (order) => order.status === "Completed" || order.status === "Cancelled",
+  );
+  const viewOrder = (order: OnlineOrder) => {
+    window.sessionStorage.setItem("plmun-selected-order", order.id);
+    setPage("Order detail");
+  };
+  const completeOrder = async (order: OnlineOrder) => {
+    setUpdating(true);
+    try {
+      const updated = await updateOrderStatus(
+        order.id,
+        "Completed",
+        "The student confirmed that the order was received.",
+      );
+      setOnlineOrders((current) =>
+        current.map((candidate) => (candidate.id === updated.id ? updated : candidate)),
+      );
+      setError("");
+      setConfirmation(null);
+      setFeedback({ message: `${order.id} was marked as received.`, tone: "success" });
+    } catch (reason) {
+      setFeedback({
+        message: reason instanceof Error ? reason.message : "The order could not be completed.",
+        tone: "error",
+      });
+    } finally {
+      setUpdating(false);
+    }
+  };
+  const confirmReceived = (order: OnlineOrder) =>
+    setConfirmation({
+      title: "Confirm order receipt",
+      message: `Confirm that you received ${order.id}? This completes the order and cannot be undone.`,
+      confirmLabel: "Confirm receipt",
+      onConfirm: () => completeOrder(order),
+    });
 
   return (
     <>
@@ -1403,8 +1622,66 @@ function OrdersPage({ setPage }: { setPage: (p: string) => void }) {
           {error}
         </div>
       )}
+      <div className="mb-5 grid gap-2 rounded-xl border border-[#dce1d7] bg-white p-4 sm:grid-cols-2 xl:grid-cols-[minmax(220px,1fr)_210px_180px_auto]">
+        <label className="relative">
+          <span className="sr-only">Search orders</span>
+          <Search
+            size={15}
+            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#7c8981]"
+          />
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search order number or item"
+            className="min-h-11 w-full rounded-lg border border-[#d8ddd4] pl-9 pr-3 text-xs"
+          />
+        </label>
+        <label>
+          <span className="sr-only">Filter orders by status</span>
+          <select
+            value={statusFilter}
+            onChange={(event) => setStatusFilter(event.target.value)}
+            className="min-h-11 w-full rounded-lg border border-[#d8ddd4] bg-white px-3 text-xs"
+          >
+            <option>All</option>
+            {[
+              "Pending review",
+              "Confirmed",
+              "Awaiting restock",
+              "Ready for pickup",
+              "Completed",
+              "Cancelled",
+            ].map((status) => (
+              <option key={status}>{status}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span className="sr-only">Filter orders by date</span>
+          <input
+            type="date"
+            value={dateFilter}
+            onChange={(event) => setDateFilter(event.target.value)}
+            className="min-h-11 w-full rounded-lg border border-[#d8ddd4] bg-white px-3 text-xs"
+            aria-label="Filter orders by date"
+          />
+        </label>
+        <Button
+          kind="secondary"
+          disabled={!query && statusFilter === "All" && !dateFilter}
+          onClick={() => {
+            setQuery("");
+            setStatusFilter("All");
+            setDateFilter("");
+          }}
+          className="gap-2"
+        >
+          <RotateCcw size={14} /> Clear
+        </Button>
+      </div>
+      <h2 className="mb-3 text-sm font-semibold text-[#29483a]">Active orders</h2>
       <div className="space-y-3 md:hidden">
-        {onlineOrders.map((order) => (
+        {activeOrders.map((order) => (
           <article
             key={order.id}
             className="rounded-xl border border-[#dde1d8] bg-white p-4 shadow-sm"
@@ -1430,22 +1707,29 @@ function OrdersPage({ setPage }: { setPage: (p: string) => void }) {
               </Pill>
             </div>
             <p className="mt-3 text-xs leading-5 text-[#78847c]">{order.statusMessage}</p>
-            <div className="mt-4 flex items-center justify-between border-t border-[#e2e6de] pt-3">
+            <div className="mt-4 flex flex-col gap-2 border-t border-[#e2e6de] pt-3 sm:flex-row sm:items-center sm:justify-between">
               <span className="text-sm font-semibold text-[#294c3d]">{peso(order.total)}</span>
-              <Button kind="secondary" onClick={() => setPage("Order detail")} className="min-h-10">
-                View order
-              </Button>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                {order.status === "Ready for pickup" && (
+                  <Button onClick={() => confirmReceived(order)}>Order received</Button>
+                )}
+                <Button kind="secondary" onClick={() => viewOrder(order)} className="min-h-10">
+                  View order
+                </Button>
+              </div>
             </div>
           </article>
         ))}
-        {!loading && !onlineOrders.length && (
+        {!loading && !activeOrders.length && (
           <div className="rounded-xl border border-dashed border-[#ccd4ca] bg-white/60 py-12 text-center text-sm text-[#7e8881]">
-            You haven’t placed an online order yet.
+            {onlineOrders.length && (query || statusFilter !== "All" || dateFilter)
+              ? "No active orders match these filters."
+              : "You have no active orders."}
           </div>
         )}
       </div>
       <div className="hidden overflow-hidden rounded-xl border border-[#dde1d8] bg-white md:block">
-        <div className="table-wrap">
+        <div className="table-wrap max-h-[460px] overflow-y-auto">
           <table>
             <thead>
               <tr>
@@ -1458,7 +1742,7 @@ function OrdersPage({ setPage }: { setPage: (p: string) => void }) {
               </tr>
             </thead>
             <tbody>
-              {onlineOrders.map((order) => (
+              {activeOrders.map((order) => (
                 <tr key={order.id}>
                   <td className="font-semibold text-[#1b4635]">{order.id}</td>
                   <td>{new Date(order.createdAt).toLocaleDateString()}</td>
@@ -1483,19 +1767,23 @@ function OrdersPage({ setPage }: { setPage: (p: string) => void }) {
                     </div>
                   </td>
                   <td>
-                    <button
-                      onClick={() => setPage("Order detail")}
-                      className="font-semibold text-[#184d37]"
-                    >
-                      View
-                    </button>
+                    <div className="flex justify-end gap-2">
+                      {order.status === "Ready for pickup" && (
+                        <Button onClick={() => confirmReceived(order)}>Order received</Button>
+                      )}
+                      <Button kind="secondary" onClick={() => viewOrder(order)}>
+                        View
+                      </Button>
+                    </div>
                   </td>
                 </tr>
               ))}
-              {!loading && !onlineOrders.length && (
+              {!loading && !activeOrders.length && (
                 <tr>
                   <td colSpan={6} className="py-12 text-center text-xs text-[#879087]">
-                    You haven’t placed an online order yet.
+                    {onlineOrders.length && (query || statusFilter !== "All" || dateFilter)
+                      ? "No active orders match these filters."
+                      : "You have no active orders."}
                   </td>
                 </tr>
               )}
@@ -1503,25 +1791,253 @@ function OrdersPage({ setPage }: { setPage: (p: string) => void }) {
           </table>
         </div>
       </div>
+      <section className="mt-8">
+        <h2 className="mb-3 text-sm font-semibold text-[#29483a]">Order history</h2>
+        <div className="max-h-[360px] overflow-y-auto rounded-xl border border-[#dde1d8] bg-white">
+          {orderHistory.map((order, index) => (
+            <button
+              key={order.id}
+              onClick={() => viewOrder(order)}
+              className={`flex min-h-16 w-full items-center justify-between gap-4 px-4 py-3 text-left transition hover:bg-[#f2f5f0] ${
+                index ? "border-t border-[#e5e8e2]" : ""
+              }`}
+            >
+              <span>
+                <span className="block text-xs font-semibold text-[#29483a]">{order.id}</span>
+                <span className="mt-1 block text-[10px] text-[#6f7c74]">
+                  {new Date(order.updatedAt).toLocaleDateString()} · {peso(order.total)}
+                </span>
+              </span>
+              <Pill tone={order.status === "Cancelled" ? "gray" : "green"}>{order.status}</Pill>
+            </button>
+          ))}
+          {!loading && !orderHistory.length && (
+            <div className="py-10 text-center text-xs text-[#758078]">
+              {onlineOrders.length && (query || statusFilter !== "All" || dateFilter)
+                ? "No order history matches these filters."
+                : "Completed and cancelled orders will appear here."}
+            </div>
+          )}
+        </div>
+      </section>
       {loading && <div className="mt-4 text-xs text-[#7d857e]">Loading your orders…</div>}
+      <ConfirmationDialog
+        config={confirmation}
+        busy={updating}
+        onClose={() => setConfirmation(null)}
+      />
+      {feedback && (
+        <FeedbackToast
+          message={feedback.message}
+          tone={feedback.tone}
+          onClose={() => setFeedback(null)}
+        />
+      )}
     </>
   );
 }
 
-function Stats({ role }: { role: Role }) {
+function OrderDetailPage() {
+  const [order, setOrder] = useState<OnlineOrder | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [confirmation, setConfirmation] = useState<ConfirmationConfig | null>(null);
+  const [updating, setUpdating] = useState(false);
+  const [feedback, setFeedback] = useState<{ message: string; tone: FeedbackTone } | null>(null);
+  const selectedId = window.sessionStorage.getItem("plmun-selected-order");
+  useEffect(() => {
+    getOrders()
+      .then((items) => setOrder(items.find((item) => item.id === selectedId) ?? items[0] ?? null))
+      .catch((reason) =>
+        setError(reason instanceof Error ? reason.message : "The order could not be loaded."),
+      )
+      .finally(() => setLoading(false));
+  }, [selectedId]);
+  const completeOrder = async () => {
+    if (!order) return;
+    setUpdating(true);
+    try {
+      setOrder(
+        await updateOrderStatus(
+          order.id,
+          "Completed",
+          "The student confirmed that the order was received.",
+        ),
+      );
+      setError("");
+      setConfirmation(null);
+      setFeedback({ message: `${order.id} was marked as received.`, tone: "success" });
+    } catch (reason) {
+      setFeedback({
+        message: reason instanceof Error ? reason.message : "The order could not be completed.",
+        tone: "error",
+      });
+    } finally {
+      setUpdating(false);
+    }
+  };
+  const confirmReceived = () => {
+    if (!order) return;
+    setConfirmation({
+      title: "Confirm order receipt",
+      message: `Confirm that you received ${order.id}? This completes the order and cannot be undone.`,
+      confirmLabel: "Confirm receipt",
+      onConfirm: completeOrder,
+    });
+  };
+  if (loading) return <div className="py-12 text-center text-xs">Loading order…</div>;
+  if (!order)
+    return (
+      <div className="rounded-xl border border-[#dfc6bd] bg-[#fbefeb] p-5 text-sm text-[#8b4333]">
+        {error || "This order could not be found."}
+      </div>
+    );
+  const stages = ["Pending review", "Confirmed", "Ready for pickup", "Completed"];
+  const stageIndex =
+    order.status === "Awaiting restock"
+      ? 1
+      : order.status === "Cancelled"
+        ? 0
+        : Math.max(0, stages.indexOf(order.status));
+  return (
+    <>
+      <SectionTitle title={`Order ${order.id}`} subtitle={order.statusMessage} />
+      <section className="rounded-2xl border border-[#dce2da] bg-white p-5 sm:p-7">
+        {error && (
+          <div className="mb-5 rounded-xl border border-[#dfc6bd] bg-[#fbefeb] p-4 text-xs text-[#8b4333]">
+            {error}
+          </div>
+        )}
+        {order.status === "Cancelled" && (
+          <div className="mb-6 rounded-xl border border-[#dfb9b0] bg-[#fbefeb] p-4 text-xs text-[#844337]">
+            This order was cancelled. Contact the Business Center if you need assistance.
+          </div>
+        )}
+        {order.status === "Awaiting restock" && (
+          <div className="mb-6 rounded-xl border border-[#decf96] bg-[#faf5df] p-4 text-xs text-[#685a22]">
+            This order is waiting for stock. The Business Center will update it when items become
+            available.
+          </div>
+        )}
+        <div className="relative grid grid-cols-4 gap-1">
+          <div className="absolute left-[12.5%] right-[12.5%] top-4 h-0.5 bg-[#dce2dc]" />
+          <div
+            className="absolute left-[12.5%] top-4 h-0.5 bg-[#397458] transition-all"
+            style={{ width: `${Math.min(stageIndex, 3) * 25}%` }}
+          />
+          {stages.map((stage, index) => {
+            const complete = index < stageIndex || order.status === "Completed";
+            const current = index === stageIndex && order.status !== "Completed";
+            return (
+              <div key={stage} className="relative text-center">
+                <span
+                  className={`mx-auto grid size-8 place-items-center rounded-full border-2 text-[10px] font-bold ${
+                    complete
+                      ? "border-[#397458] bg-[#397458] text-white"
+                      : current
+                        ? "border-[#397458] bg-white text-[#285c43]"
+                        : "border-[#cdd5ce] bg-white text-[#8a958e]"
+                  }`}
+                >
+                  {complete ? "✓" : index + 1}
+                </span>
+                <span className="mt-2 block text-[9px] font-semibold leading-4 text-[#526159]">
+                  {stage}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+        <div className="mt-8 grid gap-4 border-t border-[#e2e6df] pt-5 md:grid-cols-2">
+          <div>
+            <h2 className="text-xs font-semibold text-[#29483a]">Order items</h2>
+            <div className="mt-3 space-y-2 text-xs text-[#5f6d65]">
+              {order.items.map((item) => (
+                <div key={item.productId} className="flex justify-between gap-3">
+                  <span>
+                    {item.quantity}× {item.name}
+                  </span>
+                  <span>{peso(item.quantity * item.price)}</span>
+                </div>
+              ))}
+              <div className="flex justify-between border-t pt-2 font-bold text-[#29483a]">
+                <span>Total</span>
+                <span>{peso(order.total)}</span>
+              </div>
+            </div>
+          </div>
+          <div className="rounded-xl bg-[#f4f7f2] p-4 text-xs leading-6 text-[#5f6d65]">
+            Pickup date: {order.pickupDate || "To be confirmed"}
+            <br />
+            Pickup window: {order.pickupWindow || "To be confirmed"}
+            <br />
+            Status: <strong>{order.status}</strong>
+          </div>
+        </div>
+        {order.status === "Ready for pickup" && (
+          <div className="mt-5 flex justify-end">
+            <Button onClick={confirmReceived} className="w-full sm:w-auto">
+              Order received
+            </Button>
+          </div>
+        )}
+      </section>
+      <ConfirmationDialog
+        config={confirmation}
+        busy={updating}
+        onClose={() => setConfirmation(null)}
+      />
+      {feedback && (
+        <FeedbackToast
+          message={feedback.message}
+          tone={feedback.tone}
+          onClose={() => setFeedback(null)}
+        />
+      )}
+    </>
+  );
+}
+
+function Stats({
+  role,
+  onlineOrders,
+  reports,
+  products,
+}: {
+  role: Role;
+  onlineOrders: OnlineOrder[];
+  reports: AdminReportData | null;
+  products: Product[];
+}) {
   const cards =
     role === "staff"
       ? [
-          ["Today’s sales", "₱9,320"],
-          ["Orders processed", "64"],
-          ["Pending orders", "12"],
-          ["Ready for pickup", "4"],
+          [
+            "Active online orders",
+            String(
+              onlineOrders.filter(
+                (order) => order.status !== "Completed" && order.status !== "Cancelled",
+              ).length,
+            ),
+          ],
+          [
+            "Awaiting review",
+            String(onlineOrders.filter((order) => order.status === "Pending review").length),
+          ],
+          [
+            "Stock conflicts",
+            String(onlineOrders.filter((order) => order.status === "Awaiting restock").length),
+          ],
+          [
+            "Ready for pickup",
+            String(onlineOrders.filter((order) => order.status === "Ready for pickup").length),
+          ],
         ]
       : [
-          ["Monthly sales", "₱12,450"],
-          ["Transactions", "86"],
-          ["Products", "48"],
-          ["Low-stock items", "5"],
+          ["Recorded sales", peso(reports?.summary.totalSales ?? 0)],
+          ["Transactions", String(reports?.summary.transactionCount ?? 0)],
+          ["Active products", String(products.length)],
+          ["Low-stock items", String(products.filter((product) => product.stock < 20).length)],
         ];
   return (
     <div className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -1533,15 +2049,270 @@ function Stats({ role }: { role: Role }) {
           <div className="mt-3 text-2xl font-semibold tracking-[-.03em] text-[#173f30]">
             {value}
           </div>
-          <div className="mt-2 text-[10px] text-[#718078]">↑ 8.2% from last period</div>
+          <div className="mt-2 text-[10px] text-[#718078]">Current recorded data</div>
         </div>
       ))}
     </div>
   );
 }
 
+function AdminReportsPage() {
+  const [data, setData] = useState<AdminReportData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [query, setQuery] = useState("");
+  const [sourceFilter, setSourceFilter] = useState("All");
+  const [dateFilter, setDateFilter] = useState("");
+  const [feedback, setFeedback] = useState<{ message: string; tone: FeedbackTone } | null>(null);
+  const load = async (showFeedback = false) => {
+    setLoading(true);
+    try {
+      setData(await getAdminReports());
+      setError("");
+      if (showFeedback) setFeedback({ message: "Reports refreshed.", tone: "success" });
+    } catch (reason) {
+      const message = reason instanceof Error ? reason.message : "Reports could not be loaded.";
+      setError(message);
+      if (showFeedback) setFeedback({ message, tone: "error" });
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => {
+    void load();
+  }, []);
+  const filteredTransactions =
+    data?.transactions.filter((transaction) => {
+      const search = query.trim().toLowerCase();
+      const searchable = `${transaction.id} ${transaction.source} ${transaction.orderId ?? ""}`;
+      return (
+        (!search || searchable.toLowerCase().includes(search)) &&
+        (sourceFilter === "All" || transaction.source === sourceFilter) &&
+        (!dateFilter || localDateKey(transaction.createdAt) === dateFilter)
+      );
+    }) ?? [];
+  const exportTransactions = () => {
+    if (!filteredTransactions.length) return;
+    const rows = [
+      ["Transaction", "Source", "Items", "Total", "Date"],
+      ...filteredTransactions.map((transaction) => [
+        transaction.id,
+        transaction.source,
+        String(transaction.itemCount),
+        transaction.total.toFixed(2),
+        new Date(transaction.createdAt).toLocaleString(),
+      ]),
+    ];
+    const csv = rows
+      .map((row) => row.map((value) => `"${value.replace(/"/g, '""')}"`).join(","))
+      .join("\n");
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "business-center-transactions.csv";
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+  return (
+    <>
+      <SectionTitle
+        title="Reports & transactions"
+        subtitle="Review recorded sales, transaction history, and inventory activity."
+        action={
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Button kind="secondary" onClick={() => void load(true)} disabled={loading}>
+              <RefreshCw size={14} className={loading ? "animate-spin" : ""} /> Refresh
+            </Button>
+            <Button disabled={!filteredTransactions.length} onClick={exportTransactions}>
+              Export transactions
+            </Button>
+          </div>
+        }
+      />
+      {error && (
+        <div className="mb-5 rounded-xl border border-[#dfc6bd] bg-[#fbefeb] p-4 text-xs text-[#8b4333]">
+          {error}
+        </div>
+      )}
+      {data && (
+        <>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            {[
+              ["Recorded sales", peso(data.summary.totalSales)],
+              ["Transactions", String(data.summary.transactionCount)],
+              ["Walk-in sales", peso(data.summary.walkInSales)],
+              ["Online sales", peso(data.summary.onlineSales)],
+            ].map(([label, value]) => (
+              <article key={label} className="rounded-xl border border-[#dfe3da] bg-white p-5">
+                <div className="text-[10px] font-bold uppercase tracking-wide text-[#6f7c74]">
+                  {label}
+                </div>
+                <div className="mt-3 text-2xl font-semibold text-[#173f30]">{value}</div>
+              </article>
+            ))}
+          </div>
+          <div className="mt-5 grid gap-5 xl:grid-cols-[1.2fr_.8fr]">
+            <section className="overflow-hidden rounded-xl border border-[#dce1d7] bg-white">
+              <div className="border-b border-[#e3e6e1] p-4">
+                <h2 className="text-sm font-semibold text-[#29483a]">Recent transactions</h2>
+                <div className="mt-3 grid gap-2 sm:grid-cols-2 2xl:grid-cols-[minmax(180px,1fr)_140px_160px_auto]">
+                  <label className="relative">
+                    <span className="sr-only">Search transactions</span>
+                    <Search
+                      size={14}
+                      className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#7c8981]"
+                    />
+                    <input
+                      value={query}
+                      onChange={(event) => setQuery(event.target.value)}
+                      placeholder="Search reference or order"
+                      className="min-h-10 w-full rounded-lg border border-[#d8ddd4] pl-9 pr-3 text-[11px]"
+                    />
+                  </label>
+                  <label>
+                    <span className="sr-only">Filter by transaction source</span>
+                    <select
+                      value={sourceFilter}
+                      onChange={(event) => setSourceFilter(event.target.value)}
+                      className="min-h-10 w-full rounded-lg border border-[#d8ddd4] bg-white px-3 text-[11px]"
+                    >
+                      <option>All</option>
+                      <option value="walk-in">Walk-in</option>
+                      <option value="online">Online</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span className="sr-only">Filter transactions by date</span>
+                    <input
+                      type="date"
+                      value={dateFilter}
+                      onChange={(event) => setDateFilter(event.target.value)}
+                      className="min-h-10 w-full rounded-lg border border-[#d8ddd4] bg-white px-3 text-[11px]"
+                      aria-label="Filter transactions by date"
+                    />
+                  </label>
+                  <Button
+                    kind="secondary"
+                    disabled={!query && sourceFilter === "All" && !dateFilter}
+                    onClick={() => {
+                      setQuery("");
+                      setSourceFilter("All");
+                      setDateFilter("");
+                    }}
+                    className="min-h-10 px-3"
+                  >
+                    Clear
+                  </Button>
+                </div>
+              </div>
+              <div className="table-wrap max-h-[440px] overflow-y-auto">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Reference</th>
+                      <th>Source</th>
+                      <th>Items</th>
+                      <th>Total</th>
+                      <th>Date</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredTransactions.map((transaction) => (
+                      <tr key={transaction.id}>
+                        <td data-label="Reference" className="font-semibold">
+                          {transaction.id}
+                        </td>
+                        <td data-label="Source" className="capitalize">
+                          {transaction.source}
+                        </td>
+                        <td data-label="Items">{transaction.itemCount}</td>
+                        <td data-label="Total">{peso(transaction.total)}</td>
+                        <td data-label="Date">
+                          {new Date(transaction.createdAt).toLocaleDateString()}
+                        </td>
+                      </tr>
+                    ))}
+                    {!filteredTransactions.length && (
+                      <tr>
+                        <td colSpan={5} className="py-10 text-center">
+                          {data.transactions.length
+                            ? "No transactions match these filters."
+                            : "No completed transactions yet."}
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+            <section className="overflow-hidden rounded-xl border border-[#dce1d7] bg-white">
+              <div className="border-b border-[#e3e6e1] p-4">
+                <h2 className="text-sm font-semibold text-[#29483a]">Recent inventory activity</h2>
+              </div>
+              <div className="max-h-[440px] overflow-y-auto">
+                {data.inventoryMovements.map((movement, index) => (
+                  <div
+                    key={movement.id}
+                    className={`flex items-center justify-between gap-4 p-4 ${
+                      index ? "border-t border-[#e7eae5]" : ""
+                    }`}
+                  >
+                    <div>
+                      <div className="text-xs font-semibold text-[#29483a]">
+                        {movement.productName}
+                      </div>
+                      <div className="mt-1 text-[10px] capitalize text-[#6f7c74]">
+                        {movement.type} · {new Date(movement.createdAt).toLocaleDateString()}
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div
+                        className={`text-xs font-bold ${
+                          movement.quantityChange < 0 ? "text-[#91483c]" : "text-[#2f7651]"
+                        }`}
+                      >
+                        {movement.quantityChange > 0 ? "+" : ""}
+                        {movement.quantityChange}
+                      </div>
+                      <div className="mt-1 text-[10px] text-[#6f7c74]">
+                        {movement.stockAfter} left
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                {!data.inventoryMovements.length && (
+                  <div className="py-10 text-center text-xs text-[#758078]">
+                    No inventory activity yet.
+                  </div>
+                )}
+              </div>
+            </section>
+          </div>
+        </>
+      )}
+      {loading && <div className="py-12 text-center text-xs">Loading reports…</div>}
+      {feedback && (
+        <FeedbackToast
+          message={feedback.message}
+          tone={feedback.tone}
+          onClose={() => setFeedback(null)}
+        />
+      )}
+    </>
+  );
+}
+
 function Dashboard({ role, setPage }: { role: Role; setPage: (p: string) => void }) {
   const { products } = useProductStore();
+  const [onlineOrders, setOnlineOrders] = useState<OnlineOrder[]>([]);
+  const [reports, setReports] = useState<AdminReportData | null>(null);
+  useEffect(() => {
+    if (role === "staff") {
+      getOrders().then(setOnlineOrders).catch(console.error);
+    } else {
+      getAdminReports().then(setReports).catch(console.error);
+    }
+  }, [role]);
   return (
     <>
       <SectionTitle
@@ -1549,11 +2320,11 @@ function Dashboard({ role, setPage }: { role: Role; setPage: (p: string) => void
         subtitle={`Welcome back, Alex. Here’s what’s happening ${role === "staff" ? "today" : "across the center"}.`}
         action={
           role === "admin" ? (
-            <Button onClick={() => setPage("Sales reports")}>View reports</Button>
+            <Button onClick={() => setPage("Reports & transactions")}>View reports</Button>
           ) : undefined
         }
       />
-      <Stats role={role} />
+      <Stats role={role} onlineOrders={onlineOrders} reports={reports} products={products} />
       <div className="grid gap-5 xl:grid-cols-[1.5fr_1fr]">
         <div className="rounded-lg border border-[#dfe3da] bg-white p-5">
           <div className="flex items-center justify-between">
@@ -1575,13 +2346,15 @@ function Dashboard({ role, setPage }: { role: Role; setPage: (p: string) => void
                     </tr>
                   </thead>
                   <tbody>
-                    {orders.slice(0, 3).map((o) => (
+                    {onlineOrders.slice(0, 3).map((o) => (
                       <tr key={o.id}>
                         <td>{o.id}</td>
-                        <td>Student customer</td>
-                        <td>{o.total}</td>
+                        <td>{o.customerName}</td>
+                        <td>{peso(o.total)}</td>
                         <td>
-                          <Pill tone="amber">Preparing</Pill>
+                          <Pill tone={o.status === "Awaiting restock" ? "amber" : "green"}>
+                            {o.status}
+                          </Pill>
                         </td>
                       </tr>
                     ))}
@@ -1589,7 +2362,7 @@ function Dashboard({ role, setPage }: { role: Role; setPage: (p: string) => void
                 </table>
               </div>
               <div className="space-y-3 md:hidden">
-                {orders.slice(0, 3).map((order) => (
+                {onlineOrders.slice(0, 3).map((order) => (
                   <article
                     key={order.id}
                     className="rounded-xl border border-[#dfe3da] bg-[#f8faf6] p-4"
@@ -1597,28 +2370,46 @@ function Dashboard({ role, setPage }: { role: Role; setPage: (p: string) => void
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <div className="text-sm font-semibold text-[#294c3d]">{order.id}</div>
-                        <div className="mt-1 text-xs text-[#7d8780]">Student customer</div>
+                        <div className="mt-1 text-xs text-[#7d8780]">{order.customerName}</div>
                       </div>
-                      <Pill tone="amber">Preparing</Pill>
+                      <Pill tone={order.status === "Awaiting restock" ? "amber" : "green"}>
+                        {order.status}
+                      </Pill>
                     </div>
                     <div className="mt-4 flex items-center justify-between border-t border-[#e2e6de] pt-3">
-                      <span className="text-xs text-[#7d8780]">{order.items}</span>
-                      <span className="text-sm font-semibold text-[#294c3d]">{order.total}</span>
+                      <span className="text-xs text-[#7d8780]">
+                        {order.items.reduce((sum, item) => sum + item.quantity, 0)} items
+                      </span>
+                      <span className="text-sm font-semibold text-[#294c3d]">
+                        {peso(order.total)}
+                      </span>
                     </div>
                   </article>
                 ))}
               </div>
             </div>
           ) : (
-            <div className="mt-8 flex h-44 items-end gap-5 border-b border-[#dfe4da] px-3">
-              {[44, 72, 58, 85, 92, 66].map((n, i) => (
-                <div key={i} className="flex h-full flex-1 items-end">
-                  <div
-                    className={`w-full rounded-t-sm ${i === 4 ? "bg-[#184d37]" : "bg-[#a7b99c]"}`}
-                    style={{ height: `${n}%` }}
-                  />
-                </div>
-              ))}
+            <div className="mt-7 space-y-5">
+              {[
+                ["Walk-in sales", reports?.summary.walkInSales ?? 0],
+                ["Online sales", reports?.summary.onlineSales ?? 0],
+              ].map(([label, value]) => {
+                const total = Math.max(reports?.summary.totalSales ?? 0, 1);
+                return (
+                  <div key={label as string}>
+                    <div className="mb-2 flex justify-between text-xs">
+                      <span className="text-[#5f6d65]">{label as string}</span>
+                      <span className="font-semibold">{peso(value as number)}</span>
+                    </div>
+                    <div className="h-3 overflow-hidden rounded-full bg-[#e5e9e2]">
+                      <div
+                        className="h-full rounded-full bg-[#397458]"
+                        style={{ width: `${Math.max(0, ((value as number) / total) * 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
@@ -1899,6 +2690,7 @@ function PosTerminal() {
   } | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [confirmation, setConfirmation] = useState<ConfirmationConfig | null>(null);
   const total = products.reduce((s, p) => s + (sale[p.id] || 0) * p.price, 0);
   const saleLines = products.filter((product) => sale[product.id] > 0);
   const itemCount = saleLines.reduce((sum, product) => sum + sale[product.id], 0);
@@ -2113,7 +2905,18 @@ function PosTerminal() {
             {saving ? "Processing…" : "Complete walk-in sale"}
           </Button>
           <button
-            onClick={() => setSale({})}
+            onClick={() =>
+              setConfirmation({
+                title: "Clear this transaction?",
+                message: `All ${itemCount} selected ${itemCount === 1 ? "item" : "items"} will be removed from the current transaction.`,
+                confirmLabel: "Clear transaction",
+                destructive: true,
+                onConfirm: () => {
+                  setSale({});
+                  setConfirmation(null);
+                },
+              })
+            }
             disabled={!itemCount || saving}
             className="danger-button mt-2 min-h-11 w-full rounded-lg border px-4 text-xs font-bold disabled:cursor-not-allowed disabled:opacity-45"
           >
@@ -2129,6 +2932,7 @@ function PosTerminal() {
           onClose={() => setCatalogOpen(false)}
         />
       )}
+      <ConfirmationDialog config={confirmation} onClose={() => setConfirmation(null)} />
     </>
   );
 }
@@ -2138,13 +2942,22 @@ function OrderManagementPage() {
   const [onlineOrders, setOnlineOrders] = useState<OnlineOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const loadOrders = async () => {
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("All");
+  const [dateFilter, setDateFilter] = useState("");
+  const [confirmation, setConfirmation] = useState<ConfirmationConfig | null>(null);
+  const [updating, setUpdating] = useState(false);
+  const [feedback, setFeedback] = useState<{ message: string; tone: FeedbackTone } | null>(null);
+  const loadOrders = async (showFeedback = false) => {
     setLoading(true);
     try {
       setOnlineOrders(await getOrders());
       setError("");
+      if (showFeedback) setFeedback({ message: "Orders refreshed.", tone: "success" });
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Orders could not be loaded.");
+      const message = reason instanceof Error ? reason.message : "Orders could not be loaded.";
+      setError(message);
+      if (showFeedback) setFeedback({ message, tone: "error" });
     } finally {
       setLoading(false);
     }
@@ -2153,24 +2966,78 @@ function OrderManagementPage() {
     void loadOrders();
   }, []);
   const conflicts = onlineOrders.filter((order) => order.status === "Awaiting restock");
+  const filteredOrders = onlineOrders.filter((order) => {
+    const search = query.trim().toLowerCase();
+    const searchable =
+      `${order.id} ${order.customerName} ${order.customerEmail} ${order.status} ${order.items
+        .map((item) => item.name)
+        .join(" ")}`.toLowerCase();
+    return (
+      (!search || searchable.includes(search)) &&
+      (statusFilter === "All" || order.status === statusFilter) &&
+      (!dateFilter || localDateKey(order.createdAt) === dateFilter)
+    );
+  });
+  const activeOrders = filteredOrders.filter(
+    (order) => order.status !== "Completed" && order.status !== "Cancelled",
+  );
+  const completedOrders = filteredOrders.filter(
+    (order) => order.status === "Completed" || order.status === "Cancelled",
+  );
+  const showActiveOrders = !["Completed", "Cancelled"].includes(statusFilter);
+  const showResolvedOrders =
+    statusFilter === "All" || ["Completed", "Cancelled"].includes(statusFilter);
   const changeStatus = async (order: OnlineOrder, status: OrderStatus) => {
+    setUpdating(true);
     try {
       const message =
         status === "Cancelled"
           ? "This order was cancelled because stock could not be secured."
           : status === "Ready for pickup"
             ? "Your order is prepared and ready at the Business Center counter."
-            : status === "Confirmed"
-              ? "Restocked inventory is now allocated to this order."
-              : order.statusMessage;
+            : status === "Completed"
+              ? "The order was handed to the student and marked as received."
+              : status === "Confirmed"
+                ? "Restocked inventory is now allocated to this order."
+                : order.statusMessage;
       const updated = await updateOrderStatus(order.id, status, message);
       setOnlineOrders((current) =>
         current.map((candidate) => (candidate.id === updated.id ? updated : candidate)),
       );
       if (status === "Ready for pickup") await refreshProducts();
+      setError("");
+      setConfirmation(null);
+      setFeedback({
+        message:
+          status === "Confirmed"
+            ? `${order.id} passed the stock check and was confirmed.`
+            : status === "Ready for pickup"
+              ? `${order.id} is now ready for pickup.`
+              : status === "Completed"
+                ? `${order.id} was marked as received.`
+                : `${order.id} was cancelled.`,
+        tone: status === "Cancelled" ? "info" : "success",
+      });
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "The order could not be updated.");
+      setFeedback({
+        message: reason instanceof Error ? reason.message : "The order could not be updated.",
+        tone: "error",
+      });
+    } finally {
+      setUpdating(false);
     }
+  };
+  const requestStatusChange = (order: OnlineOrder, status: "Completed" | "Cancelled") => {
+    const cancelling = status === "Cancelled";
+    setConfirmation({
+      title: cancelling ? "Cancel this order?" : "Confirm order handoff",
+      message: cancelling
+        ? `${order.id} will be cancelled and moved to resolved orders. This action cannot be undone.`
+        : `Confirm that ${order.id} was handed to the student? This completes the order and cannot be undone.`,
+      confirmLabel: cancelling ? "Cancel order" : "Confirm handoff",
+      destructive: cancelling,
+      onConfirm: () => changeStatus(order, status),
+    });
   };
 
   return (
@@ -2179,8 +3046,13 @@ function OrderManagementPage() {
         title="Order management"
         subtitle="Review online orders and resolve stock conflicts created by counter sales."
         action={
-          <Button kind="secondary" onClick={loadOrders}>
-            Refresh orders
+          <Button
+            kind="secondary"
+            onClick={() => void loadOrders(true)}
+            disabled={loading}
+            className="gap-2"
+          >
+            <RefreshCw size={14} className={loading ? "animate-spin" : ""} /> Refresh orders
           </Button>
         }
       />
@@ -2207,70 +3079,184 @@ function OrderManagementPage() {
           {error}
         </div>
       )}
-      <div className="space-y-3">
-        {onlineOrders.map((order) => (
-          <article
-            key={order.id}
-            className={`rounded-xl border bg-white p-5 shadow-sm ${order.status === "Awaiting restock" ? "border-[#ded09c]" : "border-[#dce1d7]"}`}
+      <div className="mb-5 grid gap-2 rounded-xl border border-[#dce1d7] bg-white p-4 sm:grid-cols-2 xl:grid-cols-[minmax(240px,1fr)_210px_180px_auto]">
+        <label className="relative">
+          <span className="sr-only">Search online orders</span>
+          <Search
+            size={15}
+            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#7c8981]"
+          />
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search order, student, email, or item"
+            className="min-h-11 w-full rounded-lg border border-[#d8ddd4] pl-9 pr-3 text-xs"
+          />
+        </label>
+        <label>
+          <span className="sr-only">Filter orders by status</span>
+          <select
+            value={statusFilter}
+            onChange={(event) => setStatusFilter(event.target.value)}
+            className="min-h-11 w-full rounded-lg border border-[#d8ddd4] bg-white px-3 text-xs"
           >
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div>
-                <div className="text-xs font-semibold text-[#1b4635]">{order.id}</div>
-                <div className="mt-1 text-[10px] text-[#879087]">
-                  {order.customerName} · {new Date(order.createdAt).toLocaleString()}
-                </div>
-              </div>
-              <Pill
-                tone={
-                  order.status === "Awaiting restock"
-                    ? "amber"
-                    : order.status === "Confirmed" || order.status === "Ready for pickup"
-                      ? "green"
-                      : "gray"
-                }
-              >
-                {order.status}
-              </Pill>
-            </div>
-            <div className="mt-4 grid gap-4 md:grid-cols-[1fr_220px]">
-              <div>
-                <div className="text-xs text-[#58665e]">
-                  {order.items.map((item) => `${item.quantity}× ${item.name}`).join(" · ")}
-                </div>
-                <div className="mt-2 text-[10px] leading-5 text-[#879087]">
-                  {order.statusMessage}
-                </div>
-              </div>
-              <div className="flex flex-wrap items-center justify-end gap-2">
-                {order.status === "Awaiting restock" && (
-                  <>
-                    <Button kind="secondary" onClick={() => changeStatus(order, "Confirmed")}>
-                      Check stock &amp; confirm
-                    </Button>
-                    <button
-                      onClick={() => changeStatus(order, "Cancelled")}
-                      className="danger-button flex min-h-11 items-center gap-1.5 rounded-lg px-3 text-[10px] font-semibold"
-                    >
-                      <XCircle size={13} className="icon-danger" /> Cancel
-                    </button>
-                  </>
-                )}
-                {order.status === "Confirmed" && (
-                  <Button onClick={() => changeStatus(order, "Ready for pickup")}>
-                    Ready for pickup
-                  </Button>
-                )}
-              </div>
-            </div>
-          </article>
-        ))}
-        {!loading && !onlineOrders.length && (
-          <div className="rounded-xl border border-dashed border-[#ccd4ca] bg-white/50 py-14 text-center text-xs text-[#7e8881]">
-            No online orders yet.
-          </div>
-        )}
-        {loading && <div className="py-8 text-center text-xs text-[#7e8881]">Loading orders…</div>}
+            <option>All</option>
+            {[
+              "Pending review",
+              "Confirmed",
+              "Awaiting restock",
+              "Ready for pickup",
+              "Completed",
+              "Cancelled",
+            ].map((status) => (
+              <option key={status}>{status}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span className="sr-only">Filter online orders by date</span>
+          <input
+            type="date"
+            value={dateFilter}
+            onChange={(event) => setDateFilter(event.target.value)}
+            className="min-h-11 w-full rounded-lg border border-[#d8ddd4] bg-white px-3 text-xs"
+            aria-label="Filter online orders by date"
+          />
+        </label>
+        <Button
+          kind="secondary"
+          disabled={!query && statusFilter === "All" && !dateFilter}
+          onClick={() => {
+            setQuery("");
+            setStatusFilter("All");
+            setDateFilter("");
+          }}
+          className="gap-2"
+        >
+          <RotateCcw size={14} /> Clear
+        </Button>
       </div>
+      {showActiveOrders && (
+        <>
+          <h2 className="mb-3 text-sm font-semibold text-[#29483a]">Active orders</h2>
+          <div className="max-h-[690px] space-y-3 overflow-y-auto pr-1">
+            {activeOrders.map((order) => (
+              <article
+                key={order.id}
+                className={`rounded-xl border bg-white p-5 shadow-sm ${order.status === "Awaiting restock" ? "border-[#ded09c]" : "border-[#dce1d7]"}`}
+              >
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div>
+                    <div className="text-xs font-semibold text-[#1b4635]">{order.id}</div>
+                    <div className="mt-1 text-[10px] text-[#879087]">
+                      {order.customerName} · {new Date(order.createdAt).toLocaleString()}
+                    </div>
+                  </div>
+                  <Pill
+                    tone={
+                      order.status === "Awaiting restock"
+                        ? "amber"
+                        : order.status === "Confirmed" || order.status === "Ready for pickup"
+                          ? "green"
+                          : "gray"
+                    }
+                  >
+                    {order.status}
+                  </Pill>
+                </div>
+                <div className="mt-4 grid gap-4 md:grid-cols-[1fr_220px]">
+                  <div>
+                    <div className="text-xs text-[#58665e]">
+                      {order.items.map((item) => `${item.quantity}× ${item.name}`).join(" · ")}
+                    </div>
+                    <div className="mt-2 text-[10px] leading-5 text-[#879087]">
+                      {order.statusMessage}
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center justify-end gap-2">
+                    {order.status === "Awaiting restock" && (
+                      <>
+                        <Button kind="secondary" onClick={() => changeStatus(order, "Confirmed")}>
+                          Check stock &amp; confirm
+                        </Button>
+                        <button
+                          onClick={() => requestStatusChange(order, "Cancelled")}
+                          className="danger-button flex min-h-11 items-center gap-1.5 rounded-lg px-3 text-[10px] font-semibold"
+                        >
+                          <XCircle size={13} className="icon-danger" /> Cancel
+                        </button>
+                      </>
+                    )}
+                    {order.status === "Confirmed" && (
+                      <Button onClick={() => changeStatus(order, "Ready for pickup")}>
+                        Ready for pickup
+                      </Button>
+                    )}
+                    {order.status === "Ready for pickup" && (
+                      <Button onClick={() => requestStatusChange(order, "Completed")}>
+                        Order received
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </article>
+            ))}
+            {!loading && !activeOrders.length && (
+              <div className="rounded-xl border border-dashed border-[#ccd4ca] bg-white/50 py-14 text-center text-xs text-[#7e8881]">
+                {onlineOrders.length && (query || statusFilter !== "All" || dateFilter)
+                  ? "No active orders match these filters."
+                  : "No active online orders."}
+              </div>
+            )}
+            {loading && (
+              <div className="py-8 text-center text-xs text-[#7e8881]">Loading orders…</div>
+            )}
+          </div>
+        </>
+      )}
+      {showResolvedOrders && (
+        <section className={showActiveOrders ? "mt-8" : ""}>
+          <h2 className="mb-3 text-sm font-semibold text-[#29483a]">Resolved orders</h2>
+          <div className="max-h-[360px] overflow-y-auto rounded-xl border border-[#dce1d7] bg-white">
+            {completedOrders.map((order, index) => (
+              <div
+                key={order.id}
+                className={`flex min-h-16 items-center justify-between gap-4 px-4 py-3 ${
+                  index ? "border-t border-[#e5e8e2]" : ""
+                }`}
+              >
+                <div>
+                  <div className="text-xs font-semibold text-[#29483a]">{order.id}</div>
+                  <div className="mt-1 text-[10px] text-[#6f7c74]">
+                    {order.customerName} · {new Date(order.createdAt).toLocaleDateString()} ·{" "}
+                    {peso(order.total)}
+                  </div>
+                </div>
+                <Pill tone={order.status === "Cancelled" ? "gray" : "green"}>{order.status}</Pill>
+              </div>
+            ))}
+            {!loading && !completedOrders.length && (
+              <div className="py-10 text-center text-xs text-[#758078]">
+                {onlineOrders.length && (query || statusFilter !== "All" || dateFilter)
+                  ? "No resolved orders match these filters."
+                  : "Completed and cancelled orders will appear here."}
+              </div>
+            )}
+          </div>
+        </section>
+      )}
+      <ConfirmationDialog
+        config={confirmation}
+        busy={updating}
+        onClose={() => setConfirmation(null)}
+      />
+      {feedback && (
+        <FeedbackToast
+          message={feedback.message}
+          tone={feedback.tone}
+          onClose={() => setFeedback(null)}
+        />
+      )}
     </>
   );
 }
@@ -2281,6 +3267,11 @@ function UserManagementPage({ currentUserId }: { currentUserId: string }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [query, setQuery] = useState("");
+  const [roleFilter, setRoleFilter] = useState("All");
+  const [accessFilter, setAccessFilter] = useState("All");
+  const [confirmation, setConfirmation] = useState<ConfirmationConfig | null>(null);
+  const [feedback, setFeedback] = useState<{ message: string; tone: FeedbackTone } | null>(null);
   const [draft, setDraft] = useState({
     fullName: "",
     email: "",
@@ -2303,6 +3294,19 @@ function UserManagementPage({ currentUserId }: { currentUserId: string }) {
   useEffect(() => {
     void loadUsers();
   }, []);
+  const filteredUsers = users.filter((user) => {
+    const search = query.trim().toLowerCase();
+    const searchable = `${user.full_name} ${user.email} ${user.reference}`.toLowerCase();
+    const matchesAccess =
+      accessFilter === "All" ||
+      (accessFilter === "Active" && user.active) ||
+      (accessFilter === "Removed" && !user.active);
+    return (
+      (!search || searchable.includes(search)) &&
+      (roleFilter === "All" || user.role === roleFilter) &&
+      matchesAccess
+    );
+  });
   const openForm = (user?: ManagedUser) => {
     setEditing(user ?? "new");
     setDraft(
@@ -2344,13 +3348,20 @@ function UserManagementPage({ currentUserId }: { currentUserId: string }) {
       );
       setEditing(null);
       setError("");
+      setFeedback({
+        message: editing === "new" ? "Account created." : "Account updated.",
+        tone: "success",
+      });
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "The account could not be saved.");
+      const message = reason instanceof Error ? reason.message : "The account could not be saved.";
+      setError(message);
+      setFeedback({ message, tone: "error" });
     } finally {
       setSaving(false);
     }
   };
   const toggleAccess = async (user: ManagedUser) => {
+    setSaving(true);
     try {
       const updated = user.active
         ? await removeUser(user.id)
@@ -2364,10 +3375,33 @@ function UserManagementPage({ currentUserId }: { currentUserId: string }) {
       setUsers((current) =>
         current.map((candidate) => (candidate.id === updated.id ? updated : candidate)),
       );
+      setConfirmation(null);
+      setError("");
+      setFeedback({
+        message: user.active
+          ? `${user.full_name} no longer has system access.`
+          : `${user.full_name}'s access was restored.`,
+        tone: user.active ? "info" : "success",
+      });
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Account access could not be changed.");
+      const message =
+        reason instanceof Error ? reason.message : "Account access could not be changed.";
+      setError(message);
+      setFeedback({ message, tone: "error" });
+    } finally {
+      setSaving(false);
     }
   };
+  const requestAccessChange = (user: ManagedUser) =>
+    setConfirmation({
+      title: user.active ? "Remove account access?" : "Restore account access?",
+      message: user.active
+        ? `${user.full_name} will no longer be able to sign in. Their account record will be retained.`
+        : `${user.full_name} will be able to sign in and use their assigned role again.`,
+      confirmLabel: user.active ? "Remove access" : "Restore access",
+      destructive: user.active,
+      onConfirm: () => toggleAccess(user),
+    });
 
   return (
     <>
@@ -2385,8 +3419,59 @@ function UserManagementPage({ currentUserId }: { currentUserId: string }) {
           {error}
         </div>
       )}
+      <div className="mb-4 grid gap-2 rounded-xl border border-[#dce1d7] bg-white p-4 sm:grid-cols-[minmax(220px,1fr)_150px_160px_auto]">
+        <label className="relative">
+          <span className="sr-only">Search users</span>
+          <Search
+            size={15}
+            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#7c8981]"
+          />
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search name, email, or ID"
+            className="min-h-11 w-full rounded-lg border border-[#d8ddd4] pl-9 pr-3 text-xs"
+          />
+        </label>
+        <label>
+          <span className="sr-only">Filter users by role</span>
+          <select
+            value={roleFilter}
+            onChange={(event) => setRoleFilter(event.target.value)}
+            className="min-h-11 w-full rounded-lg border border-[#d8ddd4] bg-white px-3 text-xs"
+          >
+            <option>All</option>
+            <option value="student">Students</option>
+            <option value="staff">Staff</option>
+            <option value="admin">Administrators</option>
+          </select>
+        </label>
+        <label>
+          <span className="sr-only">Filter users by access</span>
+          <select
+            value={accessFilter}
+            onChange={(event) => setAccessFilter(event.target.value)}
+            className="min-h-11 w-full rounded-lg border border-[#d8ddd4] bg-white px-3 text-xs"
+          >
+            <option>All</option>
+            <option>Active</option>
+            <option>Removed</option>
+          </select>
+        </label>
+        <Button
+          kind="secondary"
+          disabled={!query && roleFilter === "All" && accessFilter === "All"}
+          onClick={() => {
+            setQuery("");
+            setRoleFilter("All");
+            setAccessFilter("All");
+          }}
+        >
+          Clear
+        </Button>
+      </div>
       <div className="space-y-3 md:hidden">
-        {users.map((user) => (
+        {filteredUsers.map((user) => (
           <article key={user.id} className="rounded-xl border border-[#dce1d7] bg-white p-4">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
@@ -2418,7 +3503,7 @@ function UserManagementPage({ currentUserId }: { currentUserId: string }) {
               </Button>
               {user.id !== currentUserId ? (
                 <button
-                  onClick={() => toggleAccess(user)}
+                  onClick={() => requestAccessChange(user)}
                   className={`min-h-11 rounded-lg px-3 text-xs font-semibold ${user.active ? "danger-button border" : "border border-[#bfd1c0] text-[#315b48]"}`}
                 >
                   {user.active ? "Remove access" : "Restore access"}
@@ -2429,9 +3514,14 @@ function UserManagementPage({ currentUserId }: { currentUserId: string }) {
             </div>
           </article>
         ))}
+        {!loading && !filteredUsers.length && (
+          <div className="rounded-xl border border-dashed border-[#ccd4ca] bg-white/50 py-12 text-center text-xs text-[#7e8881]">
+            {users.length ? "No accounts match these filters." : "No accounts found."}
+          </div>
+        )}
       </div>
       <div className="hidden overflow-hidden rounded-xl border border-[#dce1d7] bg-white md:block">
-        <div className="table-wrap">
+        <div className="table-wrap max-h-[480px] overflow-y-auto">
           <table>
             <thead>
               <tr>
@@ -2444,7 +3534,7 @@ function UserManagementPage({ currentUserId }: { currentUserId: string }) {
               </tr>
             </thead>
             <tbody>
-              {users.map((user) => (
+              {filteredUsers.map((user) => (
                 <tr key={user.id}>
                   <td className="font-semibold text-[#294c3d]">
                     {user.full_name}
@@ -2470,7 +3560,7 @@ function UserManagementPage({ currentUserId }: { currentUserId: string }) {
                       </button>
                       {user.id !== currentUserId && (
                         <button
-                          onClick={() => toggleAccess(user)}
+                          onClick={() => requestAccessChange(user)}
                           className={`flex min-h-10 items-center gap-1.5 rounded-lg px-2.5 text-[10px] font-semibold ${user.active ? "danger-button" : "text-[#315b48] hover:bg-[#edf2eb]"}`}
                         >
                           <UserX size={13} /> {user.active ? "Remove" : "Restore"}
@@ -2480,10 +3570,10 @@ function UserManagementPage({ currentUserId }: { currentUserId: string }) {
                   </td>
                 </tr>
               ))}
-              {!loading && !users.length && (
+              {!loading && !filteredUsers.length && (
                 <tr>
                   <td colSpan={6} className="py-12 text-center text-xs">
-                    No accounts found.
+                    {users.length ? "No accounts match these filters." : "No accounts found."}
                   </td>
                 </tr>
               )}
@@ -2492,6 +3582,18 @@ function UserManagementPage({ currentUserId }: { currentUserId: string }) {
         </div>
       </div>
       {loading && <div className="mt-4 text-xs text-[#7d857e]">Loading accounts…</div>}
+      <ConfirmationDialog
+        config={confirmation}
+        busy={saving}
+        onClose={() => setConfirmation(null)}
+      />
+      {feedback && (
+        <FeedbackToast
+          message={feedback.message}
+          tone={feedback.tone}
+          onClose={() => setFeedback(null)}
+        />
+      )}
 
       {editing && (
         <div
@@ -2509,7 +3611,7 @@ function UserManagementPage({ currentUserId }: { currentUserId: string }) {
                   {editing === "new" ? "Create account" : "Edit account"}
                 </h2>
                 <p className="mt-1 text-[10px] text-[#7f8982]">
-                  Credentials are stored in Supabase Auth; profile access is stored separately.
+                  Sign-in credentials and account permissions are stored securely.
                 </p>
               </div>
               <button
@@ -2594,13 +3696,13 @@ function ManagementPage({ page }: { page: string }) {
   const { products, addProduct, editProduct, removeProduct } = useProductStore();
   const isProduct = page === "Product management";
   const isInventory = page === "Inventory management";
-  const isUser = page === "User management";
-  const isReport = page.includes("reports");
-  const [notice, setNotice] = useState("");
+  const [feedback, setFeedback] = useState<{ message: string; tone: FeedbackTone } | null>(null);
+  const [confirmation, setConfirmation] = useState<ConfirmationConfig | null>(null);
   const [editing, setEditing] = useState<Product | "new" | null>(null);
   const [saving, setSaving] = useState(false);
   const [query, setQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("All");
+  const [stockFilter, setStockFilter] = useState("All");
   const [draft, setDraft] = useState({
     name: "",
     category: "Notebooks",
@@ -2610,22 +3712,22 @@ function ManagementPage({ page }: { page: string }) {
     image: "/assets/stationery.jpg",
   });
   const title = page;
-  const userRows = ["Maria Santos", "Joshua Lim", "Nicole Reyes", "Gabriel Cruz", "Sophia Tan"];
-  const managementItems: Array<string | Product> = isUser ? userRows : products;
-  const filteredManagementItems = managementItems.filter((item, index) => {
-    const searchValue =
-      typeof item === "string"
-        ? `${item} ${item.toLowerCase().replace(" ", ".")}@plmun.edu.ph`
-        : `${item.name} ${item.category} TX-00${82 + index}`;
+  const filteredManagementItems = products.filter((item) => {
+    const searchValue = `${item.name} ${item.category}`;
     const matchesQuery = searchValue.toLowerCase().includes(query.trim().toLowerCase());
-    const matchesCategory =
-      categoryFilter === "All" || (typeof item !== "string" && item.category === categoryFilter);
-    return matchesQuery && matchesCategory;
+    const matchesCategory = categoryFilter === "All" || item.category === categoryFilter;
+    const matchesStock =
+      stockFilter === "All" ||
+      (stockFilter === "Available" && item.stock >= 20) ||
+      (stockFilter === "Low stock" && item.stock > 0 && item.stock < 20) ||
+      (stockFilter === "Out of stock" && item.stock <= 0);
+    return matchesQuery && matchesCategory && matchesStock;
   });
   const managementCategories = [...new Set(products.map((product) => product.category))];
   useEffect(() => {
     setQuery("");
     setCategoryFilter("All");
+    setStockFilter("All");
   }, [page]);
   const openProductForm = (product?: Product) => {
     setEditing(product ?? "new");
@@ -2661,9 +3763,30 @@ function ManagementPage({ page }: { page: string }) {
       if (editing === "new") await addProduct(input);
       else if (editing) await editProduct(editing.id, input);
       setEditing(null);
-      setNotice(editing === "new" ? "Product saved to Supabase" : "Product updated in Supabase");
+      setFeedback({
+        message: editing === "new" ? "Product saved to the database." : "Product updated.",
+        tone: "success",
+      });
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Unable to save product");
+      setFeedback({
+        message: error instanceof Error ? error.message : "Unable to save product.",
+        tone: "error",
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+  const deleteProduct = async (product: Product) => {
+    setSaving(true);
+    try {
+      await removeProduct(product.id);
+      setConfirmation(null);
+      setFeedback({ message: `${product.name} was removed from the database.`, tone: "success" });
+    } catch (error) {
+      setFeedback({
+        message: error instanceof Error ? error.message : "Unable to delete product.",
+        tone: "error",
+      });
     } finally {
       setSaving(false);
     }
@@ -2675,30 +3798,12 @@ function ManagementPage({ page }: { page: string }) {
         subtitle={
           isProduct
             ? "Maintain products, pricing, and availability."
-            : isInventory
-              ? "Monitor stock levels and record adjustments."
-              : isUser
-                ? "Manage access for students, staff, and administrators."
-                : "Review business center performance and activity."
+            : "Monitor stock levels and record adjustments."
         }
         action={
-          <Button
-            onClick={() =>
-              isProduct
-                ? openProductForm()
-                : setNotice(isUser ? "New user form opened" : "Report exported")
-            }
-          >
-            {isUser ? "Add user" : isProduct ? "Add product" : "Export report"}
-          </Button>
+          isProduct ? <Button onClick={() => openProductForm()}>Add product</Button> : undefined
         }
       />
-      {notice && (
-        <div className="mb-4 flex items-center justify-between rounded-md border border-[#bfd1c0] bg-[#eaf2e8] px-4 py-3 text-xs text-[#28513d]">
-          <span>{notice}. This prototype action is ready for review.</span>
-          <button onClick={() => setNotice("")}>Dismiss</button>
-        </div>
-      )}
       {editing && (
         <div
           className="fixed inset-0 z-50 grid place-items-center bg-[#0b0d0e]/60 p-4 backdrop-blur-sm"
@@ -2715,7 +3820,7 @@ function ManagementPage({ page }: { page: string }) {
                   {editing === "new" ? "Add product" : "Edit product"}
                 </h2>
                 <p className="mt-1 text-[10px] text-[#818a82]">
-                  Changes are stored in your connected Supabase database.
+                  Changes are saved to the Business Center database.
                 </p>
               </div>
               <button
@@ -2805,13 +3910,12 @@ function ManagementPage({ page }: { page: string }) {
           </form>
         </div>
       )}
-      {(isReport || page === "Transaction history") && <Stats role="admin" />}
       <div className="overflow-hidden rounded-lg border border-[#dce1d7] bg-white">
         <div className="flex flex-wrap gap-2 border-b border-[#e1e5dd] p-4">
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder={`Search ${isUser ? "users" : isProduct || isInventory ? "products" : "transactions"}`}
+            placeholder="Search products"
             className="min-h-11 w-full max-w-[360px] rounded-lg border border-[#d8ddd4] px-3 text-xs outline-none"
           />
           <select
@@ -2824,106 +3928,78 @@ function ManagementPage({ page }: { page: string }) {
               <option key={category}>{category}</option>
             ))}
           </select>
+          {isInventory && (
+            <select
+              value={stockFilter}
+              onChange={(event) => setStockFilter(event.target.value)}
+              className="min-h-11 rounded-lg border border-[#d8ddd4] bg-white px-3 text-xs"
+              aria-label="Filter products by stock level"
+            >
+              <option>All</option>
+              <option>Available</option>
+              <option>Low stock</option>
+              <option>Out of stock</option>
+            </select>
+          )}
           <Button
             kind="secondary"
-            disabled={!query && categoryFilter === "All"}
+            disabled={!query && categoryFilter === "All" && stockFilter === "All"}
             onClick={() => {
               setQuery("");
               setCategoryFilter("All");
+              setStockFilter("All");
             }}
           >
             Clear filters
           </Button>
         </div>
-        <div className="table-wrap">
+        <div className="table-wrap max-h-[480px] overflow-y-auto">
           <table>
             <thead>
               <tr>
-                {isUser ? (
-                  <>
-                    <th>Name</th>
-                    <th>Email</th>
-                    <th>Role</th>
-                    <th>Status</th>
-                    <th>Last active</th>
-                  </>
-                ) : (
-                  <>
-                    <th>{isReport || page === "Transaction history" ? "Reference" : "Product"}</th>
-                    <th>Category</th>
-                    <th>{isInventory ? "On hand" : "Price"}</th>
-                    <th>Status</th>
-                    <th>Updated</th>
-                  </>
-                )}
+                <th>Product</th>
+                <th>Category</th>
+                <th>{isInventory ? "On hand" : "Price"}</th>
+                <th>Status</th>
+                <th>Updated</th>
                 <th />
               </tr>
             </thead>
             <tbody>
-              {filteredManagementItems.map((item, i) => (
-                <tr key={typeof item === "string" ? item : item.id}>
-                  {isUser ? (
-                    <>
-                      <td data-label="Name" className="font-semibold">
-                        {item as string}
-                      </td>
-                      <td data-label="Email">
-                        {(item as string).toLowerCase().replace(" ", ".")}@plmun.edu.ph
-                      </td>
-                      <td data-label="Role">
-                        {i === 0 ? "Administrator" : i < 3 ? "Staff" : "Student"}
-                      </td>
-                      <td data-label="Status">
-                        <Pill>Active</Pill>
-                      </td>
-                      <td data-label="Last active">Today</td>
-                    </>
-                  ) : (
-                    <>
-                      <td data-label="Record" className="font-semibold">
-                        {isReport || page === "Transaction history"
-                          ? `TX-00${82 + i}`
-                          : (item as Product).name}
-                      </td>
-                      <td data-label="Category">{(item as Product).category}</td>
-                      <td data-label={isInventory ? "On hand" : "Price"}>
-                        {isInventory
-                          ? `${(item as Product).stock} units`
-                          : peso((item as Product).price)}
-                      </td>
-                      <td data-label="Status">
-                        <Pill tone={(item as Product).stock < 20 ? "amber" : "green"}>
-                          {(item as Product).stock < 20 ? "Low stock" : "Active"}
-                        </Pill>
-                      </td>
-                      <td data-label="Updated">Mar {12 - i}, 2025</td>
-                    </>
-                  )}
+              {filteredManagementItems.map((item) => (
+                <tr key={item.id}>
+                  <td data-label="Product" className="font-semibold">
+                    {item.name}
+                  </td>
+                  <td data-label="Category">{item.category}</td>
+                  <td data-label={isInventory ? "On hand" : "Price"}>
+                    {isInventory ? `${item.stock} units` : peso(item.price)}
+                  </td>
+                  <td data-label="Status">
+                    <Pill tone={item.stock <= 0 ? "gray" : item.stock < 20 ? "amber" : "green"}>
+                      {item.stock <= 0 ? "Out of stock" : item.stock < 20 ? "Low stock" : "Active"}
+                    </Pill>
+                  </td>
+                  <td data-label="Updated">Current</td>
                   <td data-label="Actions">
                     <div className="flex gap-3">
                       <button
-                        onClick={() =>
-                          !isUser && (isProduct || isInventory)
-                            ? openProductForm(item as Product)
-                            : setNotice("Record selected for review")
-                        }
+                        onClick={() => openProductForm(item)}
                         className="min-h-11 rounded-lg px-3 font-semibold text-[#184d37] hover:bg-[#edf2eb]"
                       >
                         Manage
                       </button>
                       {isProduct && (
                         <button
-                          onClick={async () => {
-                            if (!window.confirm(`Delete ${(item as Product).name}?`)) return;
-                            try {
-                              await removeProduct((item as Product).id);
-                              setNotice("Product deleted from Supabase");
-                            } catch (error) {
-                              setNotice(
-                                error instanceof Error ? error.message : "Unable to delete product",
-                              );
-                            }
-                          }}
+                          onClick={() =>
+                            setConfirmation({
+                              title: "Remove this product?",
+                              message: `${item.name} will be removed from active inventory and will no longer be available for ordering.`,
+                              confirmLabel: "Remove product",
+                              destructive: true,
+                              onConfirm: () => deleteProduct(item),
+                            })
+                          }
                           className="danger-button min-h-11 rounded-lg px-3 font-semibold"
                         >
                           Delete
@@ -2944,6 +4020,18 @@ function ManagementPage({ page }: { page: string }) {
           </table>
         </div>
       </div>
+      <ConfirmationDialog
+        config={confirmation}
+        busy={saving}
+        onClose={() => setConfirmation(null)}
+      />
+      {feedback && (
+        <FeedbackToast
+          message={feedback.message}
+          tone={feedback.tone}
+          onClose={() => setFeedback(null)}
+        />
+      )}
     </>
   );
 }
@@ -3027,6 +4115,7 @@ export default function App() {
   const [pageHistory, setPageHistory] = useState<string[]>([]);
   const [cart, setCart] = useState<Record<number, number>>({ 1: 1, 2: 1 });
   const [selected, setSelected] = useState<Product | null>(null);
+  const [lastPlacedOrder, setLastPlacedOrder] = useState<OnlineOrder | null>(null);
   const [toast, setToast] = useState("");
   const mainRef = useRef<HTMLElement>(null);
   const cartCount = useMemo(() => Object.values(cart).reduce((a, b) => a + b, 0), [cart]);
@@ -3060,6 +4149,7 @@ export default function App() {
       setPage("Home");
       setPageHistory([]);
       setCart({});
+      setLastPlacedOrder(null);
       setSessionChecking(false);
     };
     window.addEventListener("auth:expired", expireSession);
@@ -3099,7 +4189,6 @@ export default function App() {
   const add = (p: Product) => {
     setCart((c) => ({ ...c, [p.id]: (c[p.id] || 0) + 1 }));
     setToast(`${p.name} added to cart`);
-    window.setTimeout(() => setToast(""), 1800);
   };
   if (sessionChecking) {
     return (
@@ -3123,10 +4212,12 @@ export default function App() {
       <Login
         theme={theme}
         onAuthenticated={(nextUser) => {
+          window.sessionStorage.removeItem(`plmun-urgent-shown-${nextUser.id}`);
           setUser(nextUser);
           setSessionChecking(false);
           setPage(nextUser.role === "student" ? "Home" : "Dashboard");
           setPageHistory([]);
+          setLastPlacedOrder(null);
         }}
       />
     );
@@ -3139,6 +4230,7 @@ export default function App() {
     setPage("Home");
     setPageHistory([]);
     setCart({});
+    setLastPlacedOrder(null);
   };
 
   const content = (() => {
@@ -3147,7 +4239,16 @@ export default function App() {
       if (page === "Products") return <ProductsPage add={add} open={setSelected} />;
       if (page === "Services") return <ProductsPage serviceOnly add={add} open={setSelected} />;
       if (page === "Cart") return <CartPage cart={cart} setCart={setCart} setPage={navigate} />;
-      if (page === "Checkout") return <Checkout cart={cart} setCart={setCart} setPage={navigate} />;
+      if (page === "Checkout")
+        return (
+          <Checkout
+            cart={cart}
+            setCart={setCart}
+            setPage={navigate}
+            user={user}
+            onOrderCreated={setLastPlacedOrder}
+          />
+        );
       if (page === "Confirmation")
         return (
           <div className="mx-auto max-w-2xl rounded-lg border border-[#dce1d7] bg-white p-10 text-center">
@@ -3158,10 +4259,19 @@ export default function App() {
               Order placed successfully
             </h1>
             <p className="mt-2 text-sm text-[#728078]">
-              Your order <strong>ORD-1043</strong> is being prepared for pickup.
+              {lastPlacedOrder ? (
+                <>
+                  Your order <strong>{lastPlacedOrder.id}</strong> was submitted for review.
+                </>
+              ) : (
+                "Your order was submitted for review."
+              )}
             </p>
             <div className="mx-auto mt-6 max-w-sm rounded-md bg-[#f3f4ed] p-4 text-left text-xs leading-6 text-[#657068]">
-              Pickup: March 14, 1:00–3:00 PM
+              Pickup:{" "}
+              {lastPlacedOrder
+                ? `${new Date(`${lastPlacedOrder.pickupDate}T00:00:00`).toLocaleDateString()}, ${lastPlacedOrder.pickupWindow}`
+                : "See your order details"}
               <br />
               Location: PLMun Business Center
               <br />
@@ -3172,72 +4282,13 @@ export default function App() {
             </Button>
           </div>
         );
-      if (page === "Order detail")
-        return (
-          <>
-            <SectionTitle title="Order tracking · ORD-1042" subtitle="Placed March 12, 2025" />
-            <div className="rounded-lg border border-[#dce1d7] bg-white p-6">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-sm font-semibold">Ready for pickup</h2>
-                  <p className="mt-1 text-[10px] text-[#7a857e]">
-                    Your order is prepared at the Business Center counter.
-                  </p>
-                </div>
-                <Pill>Current status</Pill>
-              </div>
-              <div className="mt-8 grid gap-4 sm:grid-cols-4">
-                {[
-                  ["Order placed", ClipboardList],
-                  ["Preparing", Package],
-                  ["Ready for pickup", PackageCheck],
-                  ["Completed", CheckCircle2],
-                ].map(([label, Icon], index) => {
-                  const complete = index < 3;
-                  const current = index === 2;
-                  const StageIcon = Icon as LucideIcon;
-                  return (
-                    <div
-                      key={label as string}
-                      className={`relative rounded-xl border p-4 ${current ? "border-[#8eaa94] bg-[#edf4eb]" : "border-[#e0e4dc] bg-[#f9faf6]"}`}
-                    >
-                      <div
-                        className={`grid size-9 place-items-center rounded-full ${complete ? "bg-[#184d37] text-white" : "bg-[#e4e8e1] text-[#8b958d]"}`}
-                      >
-                        <StageIcon size={16} />
-                      </div>
-                      <div className="mt-3 text-[11px] font-semibold text-[#355346]">
-                        {label as string}
-                      </div>
-                      <div className="mt-1 text-[9px] text-[#8b938d]">
-                        {current ? "Ready now" : complete ? "Completed" : "Next step"}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-              <div className="mt-8 grid gap-4 md:grid-cols-2">
-                <div className="rounded-md bg-[#f5f6f0] p-4 text-xs leading-6">
-                  Spiral notebook × 1<br />
-                  Premium ballpen × 1<br />
-                  <strong>Total: ₱65.00</strong>
-                </div>
-                <div className="rounded-md bg-[#f5f6f0] p-4 text-xs leading-6">
-                  Pickup at PLMun Business Center
-                  <br />
-                  Show order number ORD-1042
-                  <br />
-                  Pay at pickup
-                </div>
-              </div>
-            </div>
-          </>
-        );
+      if (page === "Order detail") return <OrderDetailPage />;
       return <OrdersPage setPage={navigate} />;
     }
     if (page === "Dashboard") return <Dashboard role={role} setPage={navigate} />;
     if (role === "staff" && page === "POS terminal") return <PosTerminal />;
     if (role === "staff" && page === "Order management") return <OrderManagementPage />;
+    if (role === "admin" && page === "Reports & transactions") return <AdminReportsPage />;
     if (role === "admin" && page === "User management") {
       return <UserManagementPage currentUserId={user.id} />;
     }
@@ -3280,11 +4331,7 @@ export default function App() {
           </main>
         </div>
         {role === "student" && <Footer setPage={navigate} />}
-        {toast && (
-          <div className="fixed bottom-5 right-5 z-50 rounded-md bg-[#173f30] px-4 py-3 text-xs font-semibold text-white shadow-xl">
-            {toast}
-          </div>
-        )}
+        {toast && <FeedbackToast message={toast} onClose={() => setToast("")} />}
         {selected && (
           <div
             className="fixed inset-0 z-[100] flex items-center justify-center bg-[#0b0d0e]/65 p-4 backdrop-blur-sm"
