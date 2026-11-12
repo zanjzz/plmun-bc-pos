@@ -166,6 +166,22 @@ const navIcons: Record<string, LucideIcon> = {
   "User management": Users,
 };
 
+const navSearchKeywords: Record<string, string> = {
+  Home: "student start landing",
+  Products: "shop supplies catalog",
+  Services: "printing photocopy document",
+  "My orders": "order tracking history pickup",
+  Dashboard: "overview incoming orders counter workspace stock",
+  "POS terminal": "transaction checkout counter sale products",
+  "Order management": "online orders conflicts review pickup",
+  "Product management": "products prices catalog availability",
+  "Inventory management": "inventory stock restock availability",
+  "Sales reports": "sales revenue performance",
+  "Inventory reports": "stock inventory report",
+  "Transaction history": "transactions receipts history",
+  "User management": "users accounts roles access",
+};
+
 const peso = (value: number) => `₱${value.toFixed(2)}`;
 
 type Theme = "light" | "dark";
@@ -413,7 +429,7 @@ function NotificationCenter({
 
       {urgent &&
         createPortal(
-          <div className="fixed inset-0 z-[120] flex items-center justify-center bg-[#07110c]/65 p-4 backdrop-blur-sm">
+          <div className="fixed inset-0 z-[120] flex items-center justify-center bg-[#0b0d0e]/65 p-4 backdrop-blur-sm">
             <section
               role="alertdialog"
               aria-modal="true"
@@ -548,7 +564,23 @@ function Header({
   const role = user.role;
   const [mobileOpen, setMobileOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [navSearch, setNavSearch] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
   const settingsRef = useRef<HTMLDivElement>(null);
+  const matchingPages = navByRole[role].filter((item) =>
+    `${item} ${navSearchKeywords[item] ?? ""}`
+      .toLowerCase()
+      .includes(navSearch.trim().toLowerCase()),
+  );
+  const chooseSearchResult = (item: string) => {
+    setPage(item);
+    setNavSearch("");
+    setSearchOpen(false);
+  };
+  useEffect(() => {
+    setNavSearch("");
+    setSearchOpen(false);
+  }, [page]);
   useEffect(() => {
     if (!mobileOpen) return;
     const previous = document.body.style.overflow;
@@ -599,7 +631,7 @@ function Header({
             ))}
           </nav>
         )}
-        <label
+        <div
           className={`relative ml-auto hidden w-full max-w-[260px] ${
             role === "student" ? "xl:block" : "lg:block"
           }`}
@@ -609,11 +641,51 @@ function Header({
             className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#8d958b]"
           />
           <input
-            onFocus={() => setPage(role === "student" ? "Products" : page)}
+            value={navSearch}
+            onChange={(event) => {
+              setNavSearch(event.target.value);
+              setSearchOpen(true);
+            }}
+            onFocus={() => setSearchOpen(true)}
+            onBlur={() => window.setTimeout(() => setSearchOpen(false), 120)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                setSearchOpen(false);
+                event.currentTarget.blur();
+              }
+              if (event.key === "Enter" && matchingPages[0]) {
+                chooseSearchResult(matchingPages[0]);
+              }
+            }}
             className="w-full rounded-md border border-[#dfe3da] bg-white py-2.5 pl-9 pr-3 text-xs outline-none focus:border-[#184d37]"
-            placeholder="Search the system"
+            placeholder="Search pages and tools"
+            aria-label="Search pages and tools"
+            aria-expanded={searchOpen && Boolean(navSearch.trim())}
           />
-        </label>
+          {searchOpen && navSearch.trim() && (
+            <div className="nav-search-results absolute left-0 right-0 top-[calc(100%+8px)] z-50 overflow-hidden rounded-xl border border-[#d8ded6] bg-white p-1.5 shadow-[0_18px_55px_rgba(19,43,31,.18)]">
+              {matchingPages.map((item) => {
+                const Icon = navIcons[item] ?? ArrowRight;
+                return (
+                  <button
+                    key={item}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => chooseSearchResult(item)}
+                    className="flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-xs font-semibold text-[#40564b] hover:bg-[#edf2ed]"
+                  >
+                    <Icon size={15} className="text-[#4b755f]" />
+                    {item}
+                  </button>
+                );
+              })}
+              {!matchingPages.length && (
+                <div className="px-3 py-4 text-center text-xs text-[#69766e]">
+                  No matching page or tool.
+                </div>
+              )}
+            </div>
+          )}
+        </div>
         <div className="ml-auto flex shrink-0 items-center gap-1.5 sm:gap-2 md:ml-0">
           {role === "student" && (
             <button
@@ -702,7 +774,7 @@ function Header({
       {mobileOpen &&
         createPortal(
           <div
-            className="mobile-menu-backdrop fixed inset-0 z-[100] flex items-center justify-center overflow-hidden bg-[#07110c]/55 p-4 backdrop-blur-sm lg:hidden"
+            className="mobile-menu-backdrop fixed inset-0 z-[100] flex items-center justify-center overflow-hidden bg-[#0b0d0e]/60 p-4 backdrop-blur-sm lg:hidden"
             onMouseDown={() => setMobileOpen(false)}
           >
             <div
@@ -1641,7 +1713,7 @@ function ProductSelectionModal({
 
   return createPortal(
     <div
-      className="pos-modal-backdrop fixed inset-0 z-[110] flex items-center justify-center bg-[#07110c]/65 p-3 backdrop-blur-sm sm:p-5"
+      className="pos-modal-backdrop fixed inset-0 z-[110] flex items-center justify-center bg-[#0b0d0e]/65 p-3 backdrop-blur-sm sm:p-5"
       onMouseDown={onClose}
     >
       <section
@@ -2423,7 +2495,7 @@ function UserManagementPage({ currentUserId }: { currentUserId: string }) {
 
       {editing && (
         <div
-          className="fixed inset-0 z-50 grid place-items-center bg-[#10251d]/60 p-4 backdrop-blur-sm"
+          className="fixed inset-0 z-50 grid place-items-center bg-[#0b0d0e]/60 p-4 backdrop-blur-sm"
           onMouseDown={() => setEditing(null)}
         >
           <form
@@ -2527,6 +2599,8 @@ function ManagementPage({ page }: { page: string }) {
   const [notice, setNotice] = useState("");
   const [editing, setEditing] = useState<Product | "new" | null>(null);
   const [saving, setSaving] = useState(false);
+  const [query, setQuery] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("All");
   const [draft, setDraft] = useState({
     name: "",
     category: "Notebooks",
@@ -2536,6 +2610,23 @@ function ManagementPage({ page }: { page: string }) {
     image: "/assets/stationery.jpg",
   });
   const title = page;
+  const userRows = ["Maria Santos", "Joshua Lim", "Nicole Reyes", "Gabriel Cruz", "Sophia Tan"];
+  const managementItems: Array<string | Product> = isUser ? userRows : products;
+  const filteredManagementItems = managementItems.filter((item, index) => {
+    const searchValue =
+      typeof item === "string"
+        ? `${item} ${item.toLowerCase().replace(" ", ".")}@plmun.edu.ph`
+        : `${item.name} ${item.category} TX-00${82 + index}`;
+    const matchesQuery = searchValue.toLowerCase().includes(query.trim().toLowerCase());
+    const matchesCategory =
+      categoryFilter === "All" || (typeof item !== "string" && item.category === categoryFilter);
+    return matchesQuery && matchesCategory;
+  });
+  const managementCategories = [...new Set(products.map((product) => product.category))];
+  useEffect(() => {
+    setQuery("");
+    setCategoryFilter("All");
+  }, [page]);
   const openProductForm = (product?: Product) => {
     setEditing(product ?? "new");
     setDraft(
@@ -2610,7 +2701,7 @@ function ManagementPage({ page }: { page: string }) {
       )}
       {editing && (
         <div
-          className="fixed inset-0 z-50 grid place-items-center bg-[#10251d]/55 p-4"
+          className="fixed inset-0 z-50 grid place-items-center bg-[#0b0d0e]/60 p-4 backdrop-blur-sm"
           onMouseDown={() => setEditing(null)}
         >
           <form
@@ -2716,17 +2807,33 @@ function ManagementPage({ page }: { page: string }) {
       )}
       {(isReport || page === "Transaction history") && <Stats role="admin" />}
       <div className="overflow-hidden rounded-lg border border-[#dce1d7] bg-white">
-        <div className="border-b border-[#e1e5dd] p-4 flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2 border-b border-[#e1e5dd] p-4">
           <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
             placeholder={`Search ${isUser ? "users" : isProduct || isInventory ? "products" : "transactions"}`}
-            className="w-full max-w-[360px] rounded-md border border-[#d8ddd4] px-3 py-2 text-xs outline-none"
+            className="min-h-11 w-full max-w-[360px] rounded-lg border border-[#d8ddd4] px-3 text-xs outline-none"
           />
-          <select className="rounded-md border border-[#d8ddd4] bg-white px-3 py-2 text-xs">
-            <option>All categories</option>
-            <option>Notebooks</option>
-            <option>Services</option>
+          <select
+            value={categoryFilter}
+            onChange={(event) => setCategoryFilter(event.target.value)}
+            className="min-h-11 rounded-lg border border-[#d8ddd4] bg-white px-3 text-xs"
+          >
+            <option value="All">All categories</option>
+            {managementCategories.map((category) => (
+              <option key={category}>{category}</option>
+            ))}
           </select>
-          <Button kind="secondary">Apply filters</Button>
+          <Button
+            kind="secondary"
+            disabled={!query && categoryFilter === "All"}
+            onClick={() => {
+              setQuery("");
+              setCategoryFilter("All");
+            }}
+          >
+            Clear filters
+          </Button>
         </div>
         <div className="table-wrap">
           <table>
@@ -2753,10 +2860,7 @@ function ManagementPage({ page }: { page: string }) {
               </tr>
             </thead>
             <tbody>
-              {(isUser
-                ? ["Maria Santos", "Joshua Lim", "Nicole Reyes", "Gabriel Cruz", "Sophia Tan"]
-                : products
-              ).map((item, i) => (
+              {filteredManagementItems.map((item, i) => (
                 <tr key={typeof item === "string" ? item : item.id}>
                   {isUser ? (
                     <>
@@ -2829,6 +2933,13 @@ function ManagementPage({ page }: { page: string }) {
                   </td>
                 </tr>
               ))}
+              {!filteredManagementItems.length && (
+                <tr>
+                  <td colSpan={6} className="py-12 text-center text-xs text-[#69766e]">
+                    No records match your search and filters.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -2909,7 +3020,9 @@ export default function App() {
     if (stored === "light" || stored === "dark") return stored;
     return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
   });
-  const [user, setUser] = useState<AuthUser | null>(readStoredSession);
+  const [storedSession] = useState<AuthUser | null>(readStoredSession);
+  const [user, setUser] = useState<AuthUser | null>(storedSession);
+  const [sessionChecking, setSessionChecking] = useState(Boolean(storedSession));
   const [page, setPage] = useState("Home");
   const [pageHistory, setPageHistory] = useState<string[]>([]);
   const [cart, setCart] = useState<Record<number, number>>({ 1: 1, 2: 1 });
@@ -2925,6 +3038,33 @@ export default function App() {
     const themeColor = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
     if (themeColor) themeColor.content = theme === "dark" ? "#101112" : "#123d2c";
   }, [theme]);
+  useEffect(() => {
+    if (!storedSession) return;
+    let active = true;
+    authProvider
+      .restoreSession()
+      .then((restored) => {
+        if (active) setUser(restored);
+      })
+      .finally(() => {
+        if (active) setSessionChecking(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [storedSession]);
+  useEffect(() => {
+    const expireSession = () => {
+      void authProvider.signOut();
+      setUser(null);
+      setPage("Home");
+      setPageHistory([]);
+      setCart({});
+      setSessionChecking(false);
+    };
+    window.addEventListener("auth:expired", expireSession);
+    return () => window.removeEventListener("auth:expired", expireSession);
+  }, []);
   useEffect(() => {
     if (!selected) return;
     const previous = document.body.style.overflow;
@@ -2961,12 +3101,30 @@ export default function App() {
     setToast(`${p.name} added to cart`);
     window.setTimeout(() => setToast(""), 1800);
   };
+  if (sessionChecking) {
+    return (
+      <main
+        data-theme={theme}
+        className="login-shell grid min-h-screen place-items-center bg-[#edf0e8]"
+      >
+        <div className="text-center">
+          <img
+            src="/assets/plmun-logo.png"
+            alt="PLMun seal"
+            className="mx-auto size-14 object-contain"
+          />
+          <p className="mt-4 text-xs font-semibold text-[#526159]">Restoring your session…</p>
+        </div>
+      </main>
+    );
+  }
   if (!user) {
     return (
       <Login
         theme={theme}
         onAuthenticated={(nextUser) => {
           setUser(nextUser);
+          setSessionChecking(false);
           setPage(nextUser.role === "student" ? "Home" : "Dashboard");
           setPageHistory([]);
         }}
@@ -3129,7 +3287,7 @@ export default function App() {
         )}
         {selected && (
           <div
-            className="fixed inset-0 z-[100] flex items-center justify-center bg-[#10251d]/60 p-4 backdrop-blur-sm"
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-[#0b0d0e]/65 p-4 backdrop-blur-sm"
             onMouseDown={() => setSelected(null)}
           >
             <div

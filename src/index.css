@@ -205,6 +205,18 @@ html[data-theme="dark"] body::before {
   background: #202325 !important;
 }
 
+[data-theme="dark"] .nav-search-results {
+  border-color: #3b4042 !important;
+  color: #e1e5e2 !important;
+  background: #202325 !important;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.52) !important;
+}
+
+[data-theme="dark"] .nav-search-results button:hover {
+  color: #eef2ef !important;
+  background: #2b302d !important;
+}
+
 [data-theme="dark"] .settings-popover {
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.52) !important;
 }

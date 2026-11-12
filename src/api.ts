@@ -55,6 +55,10 @@ export async function apiRequest<T>(
       );
     }
     if (response.status === 401) {
+      if (authenticated) {
+        clearAccessToken();
+        window.dispatchEvent(new Event("auth:expired"));
+      }
       throw new Error(body?.error ?? "Your email or password is incorrect. Please try again.");
     }
     if (response.status === 403) {
