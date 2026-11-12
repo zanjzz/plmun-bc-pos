@@ -1211,7 +1211,7 @@ function StudentHome({
                 <Clock3 size={14} className="icon-info" /> Live order updates
               </span>
               <span className="flex items-center gap-1.5">
-                <ShieldCheck size={14} className="icon-success" /> Secure student access
+                <ShieldCheck size={14} className="icon-success" /> Reliable
               </span>
             </div>
           </div>
