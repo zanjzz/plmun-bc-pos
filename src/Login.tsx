@@ -251,7 +251,7 @@ export default function Login({
                     ? "Signing in…"
                     : "Creating account…"
                   : mode === "login"
-                    ? "Sign in securely"
+                    ? "Sign in"
                     : "Create student account"}
                 {!loading && (
                   <ArrowRight size={15} className="transition group-hover:translate-x-0.5" />
@@ -291,7 +291,7 @@ export default function Login({
                   })}
                 </div>
                 <p className="mt-4 text-center text-[10px] text-[#929991]">
-                  Choose a role, then select “Sign in securely.”
+                  Choose a role, then select “Sign in.”
                 </p>
               </div>
             )}

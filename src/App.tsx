@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
+  ArrowLeft,
   ArrowRight,
   BarChart3,
   Boxes,
@@ -32,6 +33,7 @@ import {
   Users,
   UserX,
   Pencil,
+  X,
   XCircle,
   type LucideIcon,
 } from "lucide-react";
@@ -158,7 +160,7 @@ function ThemeToggle({ theme, onToggle }: { theme: Theme; onToggle: () => void }
     <button
       type="button"
       onClick={onToggle}
-      className="theme-toggle grid size-9 place-items-center rounded-lg border border-[#d8ddd4] bg-white/70 text-[#486056] transition hover:-translate-y-0.5 hover:border-[#8da092]"
+      className="theme-toggle grid size-11 place-items-center rounded-lg border border-[#d8ddd4] bg-white/70 text-[#486056] transition hover:-translate-y-0.5 hover:border-[#8da092]"
       aria-label={`Switch to ${theme === "light" ? "dark" : "light"} mode`}
       title={`Switch to ${theme === "light" ? "dark" : "light"} mode`}
     >
@@ -170,8 +172,12 @@ function ThemeToggle({ theme, onToggle }: { theme: Theme; onToggle: () => void }
 function Mark() {
   return (
     <div className="flex items-center gap-2.5">
-      <img src="/assets/plmun-logo.png" alt="PLMun seal" className="size-10 object-contain" />
-      <div className="leading-none">
+      <img
+        src="/assets/plmun-logo.png"
+        alt="PLMun seal"
+        className="size-10 object-contain sm:size-11"
+      />
+      <div className="hidden leading-none sm:block">
         <div className="text-[12px] font-bold tracking-[.08em] text-[#163e30]">
           PLMUN BUSINESS CENTER
         </div>
@@ -207,7 +213,7 @@ function Button({
       type={type}
       disabled={disabled}
       onClick={onClick}
-      className={`rounded-md px-4 py-2.5 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${styles} ${className}`}
+      className={`inline-flex min-h-11 items-center justify-center rounded-lg px-4 py-2.5 text-xs font-semibold transition-all duration-200 active:scale-[.98] disabled:cursor-not-allowed disabled:opacity-50 ${styles} ${className}`}
     >
       {children}
     </button>
@@ -253,9 +259,22 @@ function Header({
 }) {
   const role = user.role;
   const [mobileOpen, setMobileOpen] = useState(false);
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const previous = document.body.style.overflow;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMobileOpen(false);
+    };
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.body.style.overflow = previous;
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [mobileOpen]);
   return (
     <header className="site-header sticky top-0 z-30 border-b border-[#dfe1d8]/80 bg-[#fbfcf7]/90 shadow-[0_1px_12px_rgba(28,61,45,.04)] backdrop-blur-xl">
-      <div className="mx-auto flex h-[72px] max-w-[1500px] items-center gap-7 px-4 sm:px-7">
+      <div className="mx-auto flex h-[68px] max-w-[1500px] items-center gap-2 px-3 sm:h-[72px] sm:gap-5 sm:px-7 lg:gap-7">
         <button
           onClick={() => setPage(role === "student" ? "Home" : "Dashboard")}
           aria-label="Go to dashboard"
@@ -289,10 +308,11 @@ function Header({
         {role === "student" && (
           <button
             onClick={() => setPage("Cart")}
-            className="relative flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold text-[#374c42] transition hover:bg-[#edf0e8]"
+            className="relative grid size-11 place-items-center rounded-lg text-[#374c42] transition hover:bg-[#edf0e8]"
+            aria-label={`Shopping cart with ${cartCount} items`}
           >
-            <ShoppingBag size={16} /> <span className="hidden sm:inline">Cart</span>
-            <span className="rounded-full bg-[#184d37] px-1.5 py-0.5 text-[9px] text-white">
+            <ShoppingBag size={18} />
+            <span className="absolute right-0.5 top-0.5 min-w-4 rounded-full bg-[#184d37] px-1 py-0.5 text-center text-[8px] font-bold leading-none text-white">
               {cartCount}
             </span>
           </button>
@@ -310,37 +330,75 @@ function Header({
         </button>
         <button
           onClick={() => setMobileOpen(!mobileOpen)}
-          className="rounded-lg border border-[#d8ddd4] p-2.5 text-[#375446] lg:hidden"
+          className="grid size-11 place-items-center rounded-lg border border-[#d8ddd4] text-[#375446] lg:hidden"
           aria-label="Open navigation"
+          aria-expanded={mobileOpen}
         >
           <Menu size={17} />
         </button>
       </div>
       {mobileOpen && (
-        <div className="border-t border-[#e1e4dc] bg-white p-3 lg:hidden">
-          {navByRole[role].map((item) =>
-            (() => {
-              const Icon = navIcons[item] ?? ArrowRight;
-              return (
-                <button
-                  key={item}
-                  onClick={() => {
-                    setPage(item);
-                    setMobileOpen(false);
-                  }}
-                  className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-xs font-semibold hover:bg-[#edf0e8]"
-                >
-                  <Icon size={15} /> {item}
-                </button>
-              );
-            })(),
-          )}
-          <button
-            onClick={onSignOut}
-            className="mt-2 flex w-full items-center gap-2 rounded-lg border border-[#d8ddd4] px-3 py-2.5 text-left text-xs font-semibold text-[#6b4a42]"
+        <div
+          className="mobile-menu-backdrop fixed inset-0 z-50 grid place-items-center bg-[#07110c]/55 p-4 backdrop-blur-sm lg:hidden"
+          onMouseDown={() => setMobileOpen(false)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Navigation menu"
+            className="mobile-menu-dialog max-h-[calc(100dvh-2rem)] w-full max-w-sm overflow-y-auto rounded-2xl border border-white/20 bg-white p-4 shadow-[0_24px_80px_rgba(0,0,0,.28)]"
+            onMouseDown={(event) => event.stopPropagation()}
           >
-            <LogOut size={15} /> Sign out
-          </button>
+            <div className="mb-3 flex items-center justify-between px-1">
+              <div className="flex items-center gap-3">
+                <img
+                  src="/assets/plmun-logo.png"
+                  alt="PLMun seal"
+                  className="size-10 object-contain"
+                />
+                <div>
+                  <div className="text-xs font-semibold text-[#1f4032]">Navigation</div>
+                  <div className="mt-0.5 text-[9px] capitalize text-[#839087]">{role} account</div>
+                </div>
+              </div>
+              <button
+                onClick={() => setMobileOpen(false)}
+                className="grid size-11 place-items-center rounded-xl text-[#65766c] hover:bg-[#eef1eb]"
+                aria-label="Close menu"
+              >
+                <X size={19} />
+              </button>
+            </div>
+            <nav className="space-y-1.5">
+              {navByRole[role].map((item) => {
+                const Icon = navIcons[item] ?? ArrowRight;
+                return (
+                  <button
+                    key={item}
+                    onClick={() => {
+                      setPage(item);
+                      setMobileOpen(false);
+                    }}
+                    className={`flex min-h-12 w-full items-center gap-3 rounded-xl px-3.5 py-3 text-left text-sm font-semibold transition ${page === item ? "bg-[#e8efe8] text-[#184d37]" : "text-[#4d6056] hover:bg-[#f0f2ed]"}`}
+                  >
+                    <span className="grid size-8 place-items-center rounded-lg bg-white shadow-sm">
+                      <Icon size={16} />
+                    </span>
+                    {item}
+                  </button>
+                );
+              })}
+            </nav>
+            <button
+              onClick={() => {
+                setMobileOpen(false);
+                onSignOut();
+              }}
+              className="mt-4 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-[#d8ddd4] px-3 py-3 text-xs font-semibold text-[#6b4a42]"
+            >
+              <LogOut size={15} /> Sign out
+            </button>
+          </div>
         </div>
       )}
     </header>
@@ -400,6 +458,20 @@ function SectionTitle({
       </div>
       {action}
     </div>
+  );
+}
+
+function BackButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="back-button mb-4 inline-flex size-11 items-center justify-center rounded-xl border border-[#d8ddd4] bg-white text-[#486056] shadow-sm transition hover:-translate-x-0.5 hover:border-[#8da092] hover:text-[#184d37]"
+      aria-label="Go back"
+      title="Go back"
+    >
+      <ArrowLeft size={18} />
+    </button>
   );
 }
 
@@ -495,10 +567,10 @@ function StudentHome({
               Shop school essentials, request printing services, and pick up your order on
               campus—without the long wait.
             </p>
-            <div className="mt-8 flex flex-wrap gap-3">
+            <div className="mt-8 flex flex-col gap-3 sm:flex-row">
               <Button
                 onClick={() => setPage("Products")}
-                className="group flex items-center gap-2 px-5 py-3"
+                className="group w-full gap-2 px-5 py-3 sm:w-[176px]"
               >
                 Browse products
                 <ArrowRight size={14} className="transition group-hover:translate-x-0.5" />
@@ -506,7 +578,7 @@ function StudentHome({
               <Button
                 kind="secondary"
                 onClick={() => setPage("Services")}
-                className="flex items-center gap-2 px-5 py-3"
+                className="w-full gap-2 px-5 py-3 sm:w-[176px]"
               >
                 <Printer size={14} /> View services
               </Button>
@@ -898,7 +970,48 @@ function OrdersPage({ setPage }: { setPage: (p: string) => void }) {
           {error}
         </div>
       )}
-      <div className="overflow-hidden rounded-lg border border-[#dde1d8] bg-white">
+      <div className="space-y-3 md:hidden">
+        {onlineOrders.map((order) => (
+          <article
+            key={order.id}
+            className="rounded-xl border border-[#dde1d8] bg-white p-4 shadow-sm"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-sm font-semibold text-[#1b4635]">{order.id}</div>
+                <div className="mt-1 text-xs text-[#7d8780]">
+                  {new Date(order.createdAt).toLocaleDateString()} ·{" "}
+                  {order.items.reduce((sum, item) => sum + item.quantity, 0)} items
+                </div>
+              </div>
+              <Pill
+                tone={
+                  order.status === "Awaiting restock"
+                    ? "amber"
+                    : order.status === "Ready for pickup" || order.status === "Confirmed"
+                      ? "green"
+                      : "gray"
+                }
+              >
+                {order.status}
+              </Pill>
+            </div>
+            <p className="mt-3 text-xs leading-5 text-[#78847c]">{order.statusMessage}</p>
+            <div className="mt-4 flex items-center justify-between border-t border-[#e2e6de] pt-3">
+              <span className="text-sm font-semibold text-[#294c3d]">{peso(order.total)}</span>
+              <Button kind="secondary" onClick={() => setPage("Order detail")} className="min-h-10">
+                View order
+              </Button>
+            </div>
+          </article>
+        ))}
+        {!loading && !onlineOrders.length && (
+          <div className="rounded-xl border border-dashed border-[#ccd4ca] bg-white/60 py-12 text-center text-sm text-[#7e8881]">
+            You haven’t placed an online order yet.
+          </div>
+        )}
+      </div>
+      <div className="hidden overflow-hidden rounded-xl border border-[#dde1d8] bg-white md:block">
         <div className="table-wrap">
           <table>
             <thead>
@@ -1002,9 +1115,9 @@ function Dashboard({ role, setPage }: { role: Role; setPage: (p: string) => void
         title={role === "staff" ? "Staff dashboard" : "Administrator dashboard"}
         subtitle={`Welcome back, Alex. Here’s what’s happening ${role === "staff" ? "today" : "across the center"}.`}
         action={
-          <Button onClick={() => setPage(role === "staff" ? "POS terminal" : "Sales reports")}>
-            {role === "staff" ? "Open POS terminal" : "View reports"}
-          </Button>
+          role === "admin" ? (
+            <Button onClick={() => setPage("Sales reports")}>View reports</Button>
+          ) : undefined
         }
       />
       <Stats role={role} />
@@ -1017,29 +1130,51 @@ function Dashboard({ role, setPage }: { role: Role; setPage: (p: string) => void
             <span className="text-[10px] text-[#889087]">Last 6 months</span>
           </div>
           {role === "staff" ? (
-            <div className="mt-4 table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Order</th>
-                    <th>Customer</th>
-                    <th>Total</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {orders.slice(0, 3).map((o) => (
-                    <tr key={o.id}>
-                      <td>{o.id}</td>
-                      <td>Student customer</td>
-                      <td>{o.total}</td>
-                      <td>
-                        <Pill tone="amber">Preparing</Pill>
-                      </td>
+            <div className="mt-4">
+              <div className="hidden table-wrap md:block">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Order</th>
+                      <th>Customer</th>
+                      <th>Total</th>
+                      <th>Status</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {orders.slice(0, 3).map((o) => (
+                      <tr key={o.id}>
+                        <td>{o.id}</td>
+                        <td>Student customer</td>
+                        <td>{o.total}</td>
+                        <td>
+                          <Pill tone="amber">Preparing</Pill>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="space-y-3 md:hidden">
+                {orders.slice(0, 3).map((order) => (
+                  <article
+                    key={order.id}
+                    className="rounded-xl border border-[#dfe3da] bg-[#f8faf6] p-4"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="text-sm font-semibold text-[#294c3d]">{order.id}</div>
+                        <div className="mt-1 text-xs text-[#7d8780]">Student customer</div>
+                      </div>
+                      <Pill tone="amber">Preparing</Pill>
+                    </div>
+                    <div className="mt-4 flex items-center justify-between border-t border-[#e2e6de] pt-3">
+                      <span className="text-xs text-[#7d8780]">{order.items}</span>
+                      <span className="text-sm font-semibold text-[#294c3d]">{order.total}</span>
+                    </div>
+                  </article>
+                ))}
+              </div>
             </div>
           ) : (
             <div className="mt-8 flex h-44 items-end gap-5 border-b border-[#dfe4da] px-3">
@@ -1074,15 +1209,25 @@ function Dashboard({ role, setPage }: { role: Role; setPage: (p: string) => void
               </div>
             ))}
           </div>
-          <Button
-            className="mt-3 w-full"
-            kind="secondary"
-            onClick={() => setPage(role === "staff" ? "POS terminal" : "Inventory management")}
-          >
-            {role === "staff" ? "Start a transaction" : "Manage inventory"}
-          </Button>
+          {role === "admin" && (
+            <Button
+              className="mt-3 w-full"
+              kind="secondary"
+              onClick={() => setPage("Inventory management")}
+            >
+              Manage inventory
+            </Button>
+          )}
         </div>
       </div>
+      {role === "staff" && (
+        <button
+          onClick={() => setPage("POS terminal")}
+          className="fixed bottom-[max(1rem,env(safe-area-inset-bottom))] right-4 z-30 flex min-h-12 items-center gap-2 rounded-full bg-[#184d37] px-5 py-3 text-sm font-semibold text-white shadow-[0_14px_36px_rgba(12,45,31,.32)] transition hover:-translate-y-0.5 hover:bg-[#103d2b] sm:bottom-6 sm:right-6"
+        >
+          <ScanLine size={18} /> Start transaction
+        </button>
+      )}
     </>
   );
 }
@@ -1153,13 +1298,13 @@ function PosTerminal() {
     <>
       <SectionTitle title="POS terminal" subtitle="Create a quick walk-in transaction." />
       <div className="grid gap-5 xl:grid-cols-[1fr_370px]">
-        <div>
+        <div className="order-2 xl:order-1">
           <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
             {products.map((p) => (
               <button
                 key={p.id}
                 onClick={() => setSale((c) => ({ ...c, [p.id]: (c[p.id] || 0) + 1 }))}
-                className="rounded-lg border border-[#dce1d7] bg-white p-3 text-left transition hover:border-[#184d37]"
+                className="min-h-11 rounded-xl border border-[#dce1d7] bg-white p-3 text-left transition hover:-translate-y-0.5 hover:border-[#184d37]"
               >
                 <img src={p.image} alt="" className="h-24 w-full rounded-md object-cover" />
                 <div className="mt-3 text-xs font-semibold text-[#224837]">{p.name}</div>
@@ -1171,7 +1316,7 @@ function PosTerminal() {
             ))}
           </div>
         </div>
-        <aside className="h-fit rounded-lg border border-[#dce1d7] bg-white p-5">
+        <aside className="order-1 h-fit rounded-xl border border-[#dce1d7] bg-white p-5 xl:order-2 xl:sticky xl:top-24">
           <h2 className="text-sm font-semibold">Current transaction</h2>
           <div className="mt-4 min-h-32 space-y-3">
             {products
@@ -1448,7 +1593,7 @@ function UserManagementPage({ currentUserId }: { currentUserId: string }) {
         title="User management"
         subtitle="Create accounts, update roles, and control access."
         action={
-          <Button onClick={() => openForm()} className="flex items-center gap-2">
+          <Button onClick={() => openForm()} className="w-full gap-2 sm:w-auto">
             <UserPlus size={14} /> Add user
           </Button>
         }
@@ -1458,7 +1603,52 @@ function UserManagementPage({ currentUserId }: { currentUserId: string }) {
           {error}
         </div>
       )}
-      <div className="overflow-hidden rounded-xl border border-[#dce1d7] bg-white">
+      <div className="space-y-3 md:hidden">
+        {users.map((user) => (
+          <article key={user.id} className="rounded-xl border border-[#dce1d7] bg-white p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="truncate text-sm font-semibold text-[#294c3d]">
+                  {user.full_name}
+                  {user.id === currentUserId && (
+                    <span className="ml-2 text-[9px] font-medium text-[#849087]">You</span>
+                  )}
+                </div>
+                <div className="mt-1 truncate text-xs text-[#7d8780]">{user.email}</div>
+              </div>
+              <Pill tone={user.active ? "green" : "gray"}>
+                {user.active ? "Active" : "Removed"}
+              </Pill>
+            </div>
+            <div className="mt-4 grid grid-cols-2 gap-3 rounded-lg bg-[#f6f8f4] p-3 text-xs">
+              <div>
+                <div className="text-[9px] uppercase tracking-wide text-[#8a948d]">Role</div>
+                <div className="mt-1 capitalize text-[#3d5549]">{user.role}</div>
+              </div>
+              <div>
+                <div className="text-[9px] uppercase tracking-wide text-[#8a948d]">Reference</div>
+                <div className="mt-1 truncate text-[#3d5549]">{user.reference || "—"}</div>
+              </div>
+            </div>
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <Button kind="secondary" onClick={() => openForm(user)} className="gap-2">
+                <Pencil size={14} /> Edit
+              </Button>
+              {user.id !== currentUserId ? (
+                <button
+                  onClick={() => toggleAccess(user)}
+                  className={`min-h-11 rounded-lg px-3 text-xs font-semibold ${user.active ? "border border-[#dfc6bd] text-[#8a493e]" : "border border-[#bfd1c0] text-[#315b48]"}`}
+                >
+                  {user.active ? "Remove access" : "Restore access"}
+                </button>
+              ) : (
+                <div />
+              )}
+            </div>
+          </article>
+        ))}
+      </div>
+      <div className="hidden overflow-hidden rounded-xl border border-[#dce1d7] bg-white md:block">
         <div className="table-wrap">
           <table>
             <thead>
@@ -1842,36 +2032,42 @@ function ManagementPage({ page }: { page: string }) {
                 <tr key={typeof item === "string" ? item : item.id}>
                   {isUser ? (
                     <>
-                      <td className="font-semibold">{item as string}</td>
-                      <td>{(item as string).toLowerCase().replace(" ", ".")}@plmun.edu.ph</td>
-                      <td>{i === 0 ? "Administrator" : i < 3 ? "Staff" : "Student"}</td>
-                      <td>
+                      <td data-label="Name" className="font-semibold">
+                        {item as string}
+                      </td>
+                      <td data-label="Email">
+                        {(item as string).toLowerCase().replace(" ", ".")}@plmun.edu.ph
+                      </td>
+                      <td data-label="Role">
+                        {i === 0 ? "Administrator" : i < 3 ? "Staff" : "Student"}
+                      </td>
+                      <td data-label="Status">
                         <Pill>Active</Pill>
                       </td>
-                      <td>Today</td>
+                      <td data-label="Last active">Today</td>
                     </>
                   ) : (
                     <>
-                      <td className="font-semibold">
+                      <td data-label="Record" className="font-semibold">
                         {isReport || page === "Transaction history"
                           ? `TX-00${82 + i}`
                           : (item as Product).name}
                       </td>
-                      <td>{(item as Product).category}</td>
-                      <td>
+                      <td data-label="Category">{(item as Product).category}</td>
+                      <td data-label={isInventory ? "On hand" : "Price"}>
                         {isInventory
                           ? `${(item as Product).stock} units`
                           : peso((item as Product).price)}
                       </td>
-                      <td>
+                      <td data-label="Status">
                         <Pill tone={(item as Product).stock < 20 ? "amber" : "green"}>
                           {(item as Product).stock < 20 ? "Low stock" : "Active"}
                         </Pill>
                       </td>
-                      <td>Mar {12 - i}, 2025</td>
+                      <td data-label="Updated">Mar {12 - i}, 2025</td>
                     </>
                   )}
-                  <td>
+                  <td data-label="Actions">
                     <div className="flex gap-3">
                       <button
                         onClick={() =>
@@ -1879,7 +2075,7 @@ function ManagementPage({ page }: { page: string }) {
                             ? openProductForm(item as Product)
                             : setNotice("Record selected for review")
                         }
-                        className="font-semibold text-[#184d37]"
+                        className="min-h-11 rounded-lg px-3 font-semibold text-[#184d37] hover:bg-[#edf2eb]"
                       >
                         Manage
                       </button>
@@ -1896,7 +2092,7 @@ function ManagementPage({ page }: { page: string }) {
                               );
                             }
                           }}
-                          className="font-semibold text-[#8a493e]"
+                          className="min-h-11 rounded-lg px-3 font-semibold text-[#8a493e] hover:bg-[#fbefeb]"
                         >
                           Delete
                         </button>
@@ -1987,6 +2183,7 @@ export default function App() {
   });
   const [user, setUser] = useState<AuthUser | null>(readStoredSession);
   const [page, setPage] = useState("Home");
+  const [pageHistory, setPageHistory] = useState<string[]>([]);
   const [cart, setCart] = useState<Record<number, number>>({ 1: 1, 2: 1 });
   const [selected, setSelected] = useState<Product | null>(null);
   const [toast, setToast] = useState("");
@@ -1997,9 +2194,24 @@ export default function App() {
     const favicon = document.querySelector<HTMLLinkElement>("#app-favicon");
     if (favicon) favicon.href = `/assets/plmun-favicon-${theme}-theme.png`;
     const themeColor = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
-    if (themeColor) themeColor.content = theme === "dark" ? "#0b1510" : "#123d2c";
+    if (themeColor) themeColor.content = theme === "dark" ? "#101112" : "#123d2c";
   }, [theme]);
   const toggleTheme = () => setTheme((current) => (current === "light" ? "dark" : "light"));
+  const navigate = (nextPage: string) => {
+    if (nextPage === page) return;
+    setPageHistory((history) => [...history, page].slice(-20));
+    setPage(nextPage);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+  const goBack = () => {
+    const fallback = user?.role === "student" ? "Home" : "Dashboard";
+    setPageHistory((history) => {
+      const next = [...history];
+      setPage(next.pop() ?? fallback);
+      return next;
+    });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
   const add = (p: Product) => {
     setCart((c) => ({ ...c, [p.id]: (c[p.id] || 0) + 1 }));
     setToast(`${p.name} added to cart`);
@@ -2013,6 +2225,7 @@ export default function App() {
         onAuthenticated={(nextUser) => {
           setUser(nextUser);
           setPage(nextUser.role === "student" ? "Home" : "Dashboard");
+          setPageHistory([]);
         }}
       />
     );
@@ -2023,16 +2236,17 @@ export default function App() {
     await authProvider.signOut();
     setUser(null);
     setPage("Home");
+    setPageHistory([]);
     setCart({});
   };
 
   const content = (() => {
     if (role === "student") {
-      if (page === "Home") return <StudentHome setPage={setPage} add={add} open={setSelected} />;
+      if (page === "Home") return <StudentHome setPage={navigate} add={add} open={setSelected} />;
       if (page === "Products") return <ProductsPage add={add} open={setSelected} />;
       if (page === "Services") return <ProductsPage serviceOnly add={add} open={setSelected} />;
-      if (page === "Cart") return <CartPage cart={cart} setCart={setCart} setPage={setPage} />;
-      if (page === "Checkout") return <Checkout cart={cart} setCart={setCart} setPage={setPage} />;
+      if (page === "Cart") return <CartPage cart={cart} setCart={setCart} setPage={navigate} />;
+      if (page === "Checkout") return <Checkout cart={cart} setCart={setCart} setPage={navigate} />;
       if (page === "Confirmation")
         return (
           <div className="mx-auto max-w-2xl rounded-lg border border-[#dce1d7] bg-white p-10 text-center">
@@ -2052,7 +2266,7 @@ export default function App() {
               <br />
               Payment: Pay at pickup
             </div>
-            <Button className="mt-6" onClick={() => setPage("My orders")}>
+            <Button className="mt-6" onClick={() => navigate("My orders")}>
               Track order
             </Button>
           </div>
@@ -2060,15 +2274,7 @@ export default function App() {
       if (page === "Order detail")
         return (
           <>
-            <SectionTitle
-              title="Order tracking · ORD-1042"
-              subtitle="Placed March 12, 2025"
-              action={
-                <Button kind="secondary" onClick={() => setPage("My orders")}>
-                  Back to orders
-                </Button>
-              }
-            />
+            <SectionTitle title="Order tracking · ORD-1042" subtitle="Placed March 12, 2025" />
             <div className="rounded-lg border border-[#dce1d7] bg-white p-6">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
@@ -2126,9 +2332,9 @@ export default function App() {
             </div>
           </>
         );
-      return <OrdersPage setPage={setPage} />;
+      return <OrdersPage setPage={navigate} />;
     }
-    if (page === "Dashboard") return <Dashboard role={role} setPage={setPage} />;
+    if (page === "Dashboard") return <Dashboard role={role} setPage={navigate} />;
     if (role === "staff" && page === "POS terminal") return <PosTerminal />;
     if (role === "staff" && page === "Order management") return <OrderManagementPage />;
     if (role === "admin" && page === "User management") {
@@ -2146,17 +2352,22 @@ export default function App() {
         <Header
           user={user}
           page={page}
-          setPage={setPage}
+          setPage={navigate}
           cartCount={cartCount}
           onSignOut={signOut}
           theme={theme}
           onToggleTheme={toggleTheme}
         />
         <div className="mx-auto flex min-h-[calc(100vh-72px)] max-w-[1500px]">
-          <Sidebar role={role} page={page} setPage={setPage} />
-          <main className="min-w-0 flex-1 p-4 sm:p-7 lg:p-9">{content}</main>
+          <Sidebar role={role} page={page} setPage={navigate} />
+          <main className="min-w-0 flex-1 overflow-hidden p-4 sm:p-7 lg:p-9">
+            {page !== (role === "student" ? "Home" : "Dashboard") && (
+              <BackButton onClick={goBack} />
+            )}
+            {content}
+          </main>
         </div>
-        {role === "student" && <Footer setPage={setPage} />}
+        {role === "student" && <Footer setPage={navigate} />}
         {toast && (
           <div className="fixed bottom-5 right-5 z-50 rounded-md bg-[#173f30] px-4 py-3 text-xs font-semibold text-white shadow-xl">
             {toast}
