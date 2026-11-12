@@ -47,6 +47,7 @@ import { type AuthUser, authProvider, readStoredSession, type Role } from "./aut
 import Login from "./Login";
 import {
   type AppNotification,
+  deleteNotification,
   getNotifications,
   markAllNotificationsRead,
   markNotificationRead,
@@ -149,20 +150,6 @@ const navIcons: Record<string, LucideIcon> = {
   "User management": Users,
 };
 
-const navSearchKeywords: Record<string, string> = {
-  Home: "student start landing",
-  Products: "shop supplies catalog",
-  Services: "printing photocopy document",
-  "My orders": "order tracking history pickup",
-  Dashboard: "overview incoming orders counter workspace stock",
-  "POS terminal": "transaction checkout counter sale products",
-  "Order management": "online orders conflicts review pickup",
-  "Product management": "products prices catalog availability",
-  "Inventory management": "inventory stock restock availability",
-  "Reports & transactions": "sales revenue inventory transactions receipts history",
-  "User management": "users accounts roles access",
-};
-
 const peso = (value: number) => `₱${value.toFixed(2)}`;
 
 type Theme = "light" | "dark";
@@ -191,6 +178,32 @@ const notificationTime = (value: string) => {
   return days < 7 ? `${days}d ago` : new Date(value).toLocaleDateString();
 };
 
+const notificationCanDismiss = (notification: AppNotification) => {
+  if (typeof notification.canDismiss === "boolean") return notification.canDismiss;
+  if (notification.type === "transaction" || notification.type === "system") return true;
+  if (
+    notification.type === "order" &&
+    ["Completed", "Cancelled"].includes(String(notification.metadata.status))
+  ) {
+    return true;
+  }
+  return notification.type === "inventory" && Number(notification.metadata.stock) >= 20;
+};
+
+const sortNotifications = (notifications: AppNotification[]) =>
+  [...notifications].sort((left, right) => {
+    const leftUrgent = left.metadata.urgent === true ? 1 : 0;
+    const rightUrgent = right.metadata.urgent === true ? 1 : 0;
+    if (leftUrgent !== rightUrgent) return rightUrgent - leftUrgent;
+    const leftActive = notificationCanDismiss(left) ? 0 : 1;
+    const rightActive = notificationCanDismiss(right) ? 0 : 1;
+    if (leftActive !== rightActive) return rightActive - leftActive;
+    const leftUnread = left.readAt ? 0 : 1;
+    const rightUnread = right.readAt ? 0 : 1;
+    if (leftUnread !== rightUnread) return rightUnread - leftUnread;
+    return new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime();
+  });
+
 const localDateKey = (value: string) => {
   const date = new Date(value);
   const year = date.getFullYear();
@@ -210,6 +223,7 @@ function NotificationCenter({
   const [unreadCount, setUnreadCount] = useState(0);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [notificationBusy, setNotificationBusy] = useState(false);
   const [error, setError] = useState("");
   const [urgent, setUrgent] = useState<AppNotification | null>(null);
   const [suppressUrgent, setSuppressUrgent] = useState(false);
@@ -229,7 +243,7 @@ function NotificationCenter({
       try {
         const result = await getNotifications();
         if (!active) return;
-        setNotifications(result.notifications);
+        setNotifications(sortNotifications(result.notifications));
         setUnreadCount(result.unreadCount);
         setError("");
         const popupAlreadyShown = window.sessionStorage.getItem(urgentShownKey) === "true";
@@ -272,7 +286,11 @@ function NotificationCenter({
       try {
         const updated = await markNotificationRead(notification.id);
         setNotifications((current) =>
-          current.map((item) => (item.id === updated.id ? updated : item)),
+          sortNotifications(
+            current.map((item) =>
+              item.id === updated.id ? { ...updated, canDismiss: item.canDismiss } : item,
+            ),
+          ),
         );
         setUnreadCount((current) => Math.max(0, current - 1));
       } catch {
@@ -311,16 +329,53 @@ function NotificationCenter({
   };
 
   const markAllRead = async () => {
+    setNotificationBusy(true);
     try {
       await markAllNotificationsRead();
       const readAt = new Date().toISOString();
       setNotifications((current) =>
-        current.map((notification) => ({ ...notification, readAt: notification.readAt ?? readAt })),
+        sortNotifications(
+          current.map((notification) => ({
+            ...notification,
+            readAt: notification.readAt ?? readAt,
+          })),
+        ),
       );
       setUnreadCount(0);
       setUrgent(null);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Notifications could not be updated.");
+    } finally {
+      setNotificationBusy(false);
+    }
+  };
+
+  const removeNotification = async (notification: AppNotification) => {
+    if (!notificationCanDismiss(notification)) return;
+    setNotifications((current) => current.filter((item) => item.id !== notification.id));
+    if (!notification.readAt) setUnreadCount((current) => Math.max(0, current - 1));
+    if (urgent?.id === notification.id) setUrgent(null);
+    setError("");
+    try {
+      await deleteNotification(notification.id);
+    } catch (reason) {
+      try {
+        const result = await getNotifications();
+        setNotifications(sortNotifications(result.notifications));
+        setUnreadCount(result.unreadCount);
+      } catch {
+        setNotifications((current) =>
+          sortNotifications(
+            current.some((item) => item.id === notification.id)
+              ? current
+              : [...current, notification],
+          ),
+        );
+        if (!notification.readAt) setUnreadCount((current) => current + 1);
+      }
+      setError(
+        reason instanceof Error ? reason.message : "Notification could not be removed. Try again.",
+      );
     }
   };
 
@@ -371,45 +426,75 @@ function NotificationCenter({
                   <p className="mt-0.5 text-[10px] text-[#68766e]">
                     {unreadCount ? `${unreadCount} unread` : "You’re all caught up"}
                   </p>
+                  <p className="mt-1 text-[9px] font-medium text-[#87928b]">
+                    Notifications are erased after 30 days.
+                  </p>
                 </div>
                 {unreadCount > 0 && (
                   <button
                     onClick={markAllRead}
-                    className="min-h-10 rounded-lg px-3 text-[10px] font-bold text-[#285c43] hover:bg-[#eaf1eb]"
+                    disabled={notificationBusy}
+                    className="inline-flex min-h-10 items-center gap-2 rounded-lg px-3 text-[10px] font-bold text-[#285c43] hover:bg-[#eaf1eb] disabled:opacity-60"
                   >
+                    {notificationBusy && (
+                      <RefreshCw size={12} className="animate-spin" aria-hidden="true" />
+                    )}
                     Mark all as read
                   </button>
                 )}
               </header>
               <div className="overflow-y-auto">
                 {notifications.map((notification) => (
-                  <button
+                  <article
                     key={notification.id}
-                    onClick={() => readNotification(notification)}
-                    className={`notification-item flex min-h-24 w-full gap-3 border-b border-[#e7eae5] p-4 text-left transition ${
+                    className={`notification-item group relative min-h-24 w-full border-b border-[#e7eae5] text-left transition ${
                       notification.readAt ? "bg-white" : "bg-[#f0f6ef]"
                     }`}
                   >
-                    <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-white shadow-sm">
-                      {notificationIcon(notification)}
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="flex items-start justify-between gap-3">
-                        <span className="text-xs font-bold text-[#29473a]">
-                          {notification.title}
+                    <button
+                      type="button"
+                      onClick={() => readNotification(notification)}
+                      className="flex min-h-24 w-full gap-3 p-4 pr-12 text-left"
+                    >
+                      <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-white shadow-sm">
+                        {notificationIcon(notification)}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="flex items-start justify-between gap-3">
+                          <span className="text-xs font-bold text-[#29473a]">
+                            {notification.title}
+                          </span>
+                          {!notification.readAt && (
+                            <span className="mt-1 size-2 shrink-0 rounded-full bg-[#2f7651]" />
+                          )}
                         </span>
-                        {!notification.readAt && (
-                          <span className="mt-1 size-2 shrink-0 rounded-full bg-[#2f7651]" />
-                        )}
+                        <span className="mt-1 block text-[11px] leading-5 text-[#5e6d64]">
+                          {notification.message}
+                        </span>
+                        <span className="mt-1.5 block text-[10px] font-semibold text-[#78857d]">
+                          {notificationTime(notification.createdAt)}
+                        </span>
                       </span>
-                      <span className="mt-1 block text-[11px] leading-5 text-[#5e6d64]">
-                        {notification.message}
-                      </span>
-                      <span className="mt-1.5 block text-[10px] font-semibold text-[#78857d]">
-                        {notificationTime(notification.createdAt)}
-                      </span>
-                    </span>
-                  </button>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void removeNotification(notification)}
+                      disabled={!notificationCanDismiss(notification)}
+                      className="absolute right-2.5 top-2.5 grid size-8 place-items-center rounded-lg text-[#849087] opacity-0 transition hover:bg-[#dfe7df] hover:text-[#315140] focus:opacity-100 group-hover:opacity-100 disabled:text-[#b7beb9] disabled:hover:bg-transparent"
+                      aria-label={
+                        notificationCanDismiss(notification)
+                          ? `Permanently remove ${notification.title}`
+                          : `${notification.title} cannot be removed until it is resolved`
+                      }
+                      title={
+                        notificationCanDismiss(notification)
+                          ? "Permanently remove notification"
+                          : "This notification can be removed after it is resolved"
+                      }
+                    >
+                      <X size={14} />
+                    </button>
+                  </article>
                 ))}
                 {!loading && !notifications.length && (
                   <div className="grid min-h-52 place-items-center p-8 text-center">
@@ -510,13 +595,15 @@ function Button({
   kind = "primary",
   className = "",
   disabled = false,
+  loading = false,
   type = "button",
 }: {
   children: React.ReactNode;
   onClick?: () => void;
-  kind?: "primary" | "secondary" | "ghost";
+  kind?: "primary" | "secondary" | "warning" | "info" | "ghost";
   className?: string;
   disabled?: boolean;
+  loading?: boolean;
   type?: "button" | "submit";
 }) {
   const styles =
@@ -524,14 +611,20 @@ function Button({
       ? "bg-[#184d37] text-white hover:bg-[#103d2b] shadow-sm"
       : kind === "secondary"
         ? "border border-[#bdc7bc] bg-white text-[#173d2f] hover:border-[#184d37]"
-        : "text-[#476053] hover:bg-[#edf0e8]";
+        : kind === "warning"
+          ? "border border-[#d5ad3f] bg-[#f4c95d] text-[#493a12] hover:bg-[#e8b93f] shadow-sm"
+          : kind === "info"
+            ? "border border-[#9bbcc8] bg-[#eaf3f6] text-[#285c70] hover:bg-[#dcecf1] shadow-sm"
+            : "text-[#476053] hover:bg-[#edf0e8]";
   return (
     <button
       type={type}
-      disabled={disabled}
+      disabled={disabled || loading}
       onClick={onClick}
-      className={`inline-flex min-h-11 items-center justify-center rounded-lg px-4 py-2.5 text-xs font-semibold transition-all duration-200 active:scale-[.98] disabled:cursor-not-allowed disabled:opacity-50 ${styles} ${className}`}
+      aria-busy={loading}
+      className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-xs font-semibold transition-all duration-200 active:scale-[.98] disabled:cursor-not-allowed disabled:opacity-50 ${styles} ${className}`}
     >
+      {loading && <RefreshCw size={14} className="shrink-0 animate-spin" aria-hidden="true" />}
       {children}
     </button>
   );
@@ -548,10 +641,14 @@ function FeedbackToast({
   tone?: FeedbackTone;
   onClose: () => void;
 }) {
+  const onCloseRef = useRef(onClose);
   useEffect(() => {
-    const timeout = window.setTimeout(onClose, 4500);
+    onCloseRef.current = onClose;
+  }, [onClose]);
+  useEffect(() => {
+    const timeout = window.setTimeout(() => onCloseRef.current(), 4500);
     return () => window.clearTimeout(timeout);
-  }, [message, onClose]);
+  }, [message]);
 
   const Icon = tone === "success" ? CheckCircle2 : tone === "error" ? XCircle : Bell;
   return createPortal(
@@ -669,6 +766,7 @@ function ConfirmationDialog({
                 : "bg-[#184d37] hover:bg-[#103d2b]"
             }`}
           >
+            {busy && <RefreshCw size={14} className="mr-2 animate-spin" aria-hidden="true" />}
             {busy ? "Please wait…" : config.confirmLabel}
           </button>
         </div>
@@ -720,23 +818,7 @@ function Header({
   const role = user.role;
   const [mobileOpen, setMobileOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [navSearch, setNavSearch] = useState("");
-  const [searchOpen, setSearchOpen] = useState(false);
   const settingsRef = useRef<HTMLDivElement>(null);
-  const matchingPages = navByRole[role].filter((item) =>
-    `${item} ${navSearchKeywords[item] ?? ""}`
-      .toLowerCase()
-      .includes(navSearch.trim().toLowerCase()),
-  );
-  const chooseSearchResult = (item: string) => {
-    setPage(item);
-    setNavSearch("");
-    setSearchOpen(false);
-  };
-  useEffect(() => {
-    setNavSearch("");
-    setSearchOpen(false);
-  }, [page]);
   useEffect(() => {
     if (!mobileOpen) return;
     const previous = document.body.style.overflow;
@@ -775,7 +857,7 @@ function Header({
           <Mark />
         </button>
         {role === "student" && (
-          <nav className="hidden h-full items-center gap-1 lg:flex">
+          <nav className="ml-auto hidden h-full items-center gap-1 lg:flex">
             {navByRole.student.map((item) => (
               <button
                 key={item}
@@ -788,61 +870,10 @@ function Header({
           </nav>
         )}
         <div
-          className={`relative ml-auto hidden w-full max-w-[260px] ${
-            role === "student" ? "xl:block" : "lg:block"
+          className={`flex shrink-0 items-center gap-1.5 sm:gap-2 ${
+            role === "student" ? "ml-auto lg:ml-0" : "ml-auto"
           }`}
         >
-          <Search
-            size={15}
-            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#8d958b]"
-          />
-          <input
-            value={navSearch}
-            onChange={(event) => {
-              setNavSearch(event.target.value);
-              setSearchOpen(true);
-            }}
-            onFocus={() => setSearchOpen(true)}
-            onBlur={() => window.setTimeout(() => setSearchOpen(false), 120)}
-            onKeyDown={(event) => {
-              if (event.key === "Escape") {
-                setSearchOpen(false);
-                event.currentTarget.blur();
-              }
-              if (event.key === "Enter" && matchingPages[0]) {
-                chooseSearchResult(matchingPages[0]);
-              }
-            }}
-            className="w-full rounded-md border border-[#dfe3da] bg-white py-2.5 pl-9 pr-3 text-xs outline-none focus:border-[#184d37]"
-            placeholder="Search pages and tools"
-            aria-label="Search pages and tools"
-            aria-expanded={searchOpen && Boolean(navSearch.trim())}
-          />
-          {searchOpen && navSearch.trim() && (
-            <div className="nav-search-results absolute left-0 right-0 top-[calc(100%+8px)] z-50 overflow-hidden rounded-xl border border-[#d8ded6] bg-white p-1.5 shadow-[0_18px_55px_rgba(19,43,31,.18)]">
-              {matchingPages.map((item) => {
-                const Icon = navIcons[item] ?? ArrowRight;
-                return (
-                  <button
-                    key={item}
-                    onMouseDown={(event) => event.preventDefault()}
-                    onClick={() => chooseSearchResult(item)}
-                    className="flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-xs font-semibold text-[#40564b] hover:bg-[#edf2ed]"
-                  >
-                    <Icon size={15} className="text-[#4b755f]" />
-                    {item}
-                  </button>
-                );
-              })}
-              {!matchingPages.length && (
-                <div className="px-3 py-4 text-center text-xs text-[#69766e]">
-                  No matching page or tool.
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-        <div className="ml-auto flex shrink-0 items-center gap-1.5 sm:gap-2 md:ml-0">
           {role === "student" && (
             <button
               onClick={() => setPage("Cart")}
@@ -1078,6 +1109,8 @@ function ProductCard({
         <img
           src={product.image}
           alt={product.name}
+          loading="lazy"
+          decoding="async"
           className="h-40 w-full object-cover transition duration-700 group-hover:scale-[1.04]"
         />
       </button>
@@ -1186,6 +1219,8 @@ function StudentHome({
             <img
               src="/assets/stationery.jpg"
               alt="Notebook and pen on a desk"
+              decoding="async"
+              fetchPriority="high"
               className="absolute inset-0 h-full w-full object-cover transition duration-1000 hover:scale-[1.02]"
             />
             <div className="absolute inset-0 bg-gradient-to-r from-[#e7eadf]/35 to-transparent" />
@@ -1360,7 +1395,13 @@ function CartPage({
                 key={p.id}
                 className={`flex flex-wrap items-center gap-4 p-4 ${i ? "border-t border-[#e6e8e2]" : ""}`}
               >
-                <img src={p.image} alt="" className="size-16 rounded-md object-cover" />
+                <img
+                  src={p.image}
+                  alt=""
+                  loading="lazy"
+                  decoding="async"
+                  className="size-16 rounded-md object-cover"
+                />
                 <div className="min-w-[180px] flex-1">
                   <div className="text-sm font-semibold text-[#1b4334]">{p.name}</div>
                   <div className="mt-1 text-xs text-[#889188]">{peso(p.price)} each</div>
@@ -1531,7 +1572,7 @@ function Checkout({
               {error}
             </div>
           )}
-          <Button type="submit" disabled={saving} className="mt-5 w-full">
+          <Button type="submit" loading={saving} className="mt-5 w-full">
             {saving ? "Placing order…" : "Place order"}
           </Button>
         </aside>
@@ -1547,9 +1588,6 @@ function OrdersPage({ setPage }: { setPage: (p: string) => void }) {
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
   const [dateFilter, setDateFilter] = useState("");
-  const [confirmation, setConfirmation] = useState<ConfirmationConfig | null>(null);
-  const [updating, setUpdating] = useState(false);
-  const [feedback, setFeedback] = useState<{ message: string; tone: FeedbackTone } | null>(null);
   useEffect(() => {
     getOrders()
       .then(setOnlineOrders)
@@ -1580,36 +1618,6 @@ function OrdersPage({ setPage }: { setPage: (p: string) => void }) {
     window.sessionStorage.setItem("plmun-selected-order", order.id);
     setPage("Order detail");
   };
-  const completeOrder = async (order: OnlineOrder) => {
-    setUpdating(true);
-    try {
-      const updated = await updateOrderStatus(
-        order.id,
-        "Completed",
-        "The student confirmed that the order was received.",
-      );
-      setOnlineOrders((current) =>
-        current.map((candidate) => (candidate.id === updated.id ? updated : candidate)),
-      );
-      setError("");
-      setConfirmation(null);
-      setFeedback({ message: `${order.id} was marked as received.`, tone: "success" });
-    } catch (reason) {
-      setFeedback({
-        message: reason instanceof Error ? reason.message : "The order could not be completed.",
-        tone: "error",
-      });
-    } finally {
-      setUpdating(false);
-    }
-  };
-  const confirmReceived = (order: OnlineOrder) =>
-    setConfirmation({
-      title: "Confirm order receipt",
-      message: `Confirm that you received ${order.id}? This completes the order and cannot be undone.`,
-      confirmLabel: "Confirm receipt",
-      onConfirm: () => completeOrder(order),
-    });
 
   return (
     <>
@@ -1711,7 +1719,9 @@ function OrdersPage({ setPage }: { setPage: (p: string) => void }) {
               <span className="text-sm font-semibold text-[#294c3d]">{peso(order.total)}</span>
               <div className="flex flex-col gap-2 sm:flex-row">
                 {order.status === "Ready for pickup" && (
-                  <Button onClick={() => confirmReceived(order)}>Order received</Button>
+                  <span className="rounded-lg border border-[#d8ded6] bg-[#f4f7f2] px-3 py-2.5 text-[10px] font-semibold text-[#5f6d65]">
+                    Staff will confirm receipt at pickup
+                  </span>
                 )}
                 <Button kind="secondary" onClick={() => viewOrder(order)} className="min-h-10">
                   View order
@@ -1769,7 +1779,9 @@ function OrdersPage({ setPage }: { setPage: (p: string) => void }) {
                   <td>
                     <div className="flex justify-end gap-2">
                       {order.status === "Ready for pickup" && (
-                        <Button onClick={() => confirmReceived(order)}>Order received</Button>
+                        <span className="rounded-lg border border-[#d8ded6] bg-[#f4f7f2] px-3 py-2.5 text-[10px] font-semibold text-[#5f6d65]">
+                          Staff confirms receipt
+                        </span>
                       )}
                       <Button kind="secondary" onClick={() => viewOrder(order)}>
                         View
@@ -1821,18 +1833,6 @@ function OrdersPage({ setPage }: { setPage: (p: string) => void }) {
         </div>
       </section>
       {loading && <div className="mt-4 text-xs text-[#7d857e]">Loading your orders…</div>}
-      <ConfirmationDialog
-        config={confirmation}
-        busy={updating}
-        onClose={() => setConfirmation(null)}
-      />
-      {feedback && (
-        <FeedbackToast
-          message={feedback.message}
-          tone={feedback.tone}
-          onClose={() => setFeedback(null)}
-        />
-      )}
     </>
   );
 }
@@ -1841,9 +1841,6 @@ function OrderDetailPage() {
   const [order, setOrder] = useState<OnlineOrder | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [confirmation, setConfirmation] = useState<ConfirmationConfig | null>(null);
-  const [updating, setUpdating] = useState(false);
-  const [feedback, setFeedback] = useState<{ message: string; tone: FeedbackTone } | null>(null);
   const selectedId = window.sessionStorage.getItem("plmun-selected-order");
   useEffect(() => {
     getOrders()
@@ -1853,38 +1850,6 @@ function OrderDetailPage() {
       )
       .finally(() => setLoading(false));
   }, [selectedId]);
-  const completeOrder = async () => {
-    if (!order) return;
-    setUpdating(true);
-    try {
-      setOrder(
-        await updateOrderStatus(
-          order.id,
-          "Completed",
-          "The student confirmed that the order was received.",
-        ),
-      );
-      setError("");
-      setConfirmation(null);
-      setFeedback({ message: `${order.id} was marked as received.`, tone: "success" });
-    } catch (reason) {
-      setFeedback({
-        message: reason instanceof Error ? reason.message : "The order could not be completed.",
-        tone: "error",
-      });
-    } finally {
-      setUpdating(false);
-    }
-  };
-  const confirmReceived = () => {
-    if (!order) return;
-    setConfirmation({
-      title: "Confirm order receipt",
-      message: `Confirm that you received ${order.id}? This completes the order and cannot be undone.`,
-      confirmLabel: "Confirm receipt",
-      onConfirm: completeOrder,
-    });
-  };
   if (loading) return <div className="py-12 text-center text-xs">Loading order…</div>;
   if (!order)
     return (
@@ -1975,25 +1940,12 @@ function OrderDetailPage() {
           </div>
         </div>
         {order.status === "Ready for pickup" && (
-          <div className="mt-5 flex justify-end">
-            <Button onClick={confirmReceived} className="w-full sm:w-auto">
-              Order received
-            </Button>
+          <div className="mt-5 rounded-xl border border-[#d7dfd7] bg-[#f4f7f2] p-4 text-xs leading-5 text-[#53645b]">
+            Present your order number at the counter. Staff will mark the order as received after
+            handing it to you.
           </div>
         )}
       </section>
-      <ConfirmationDialog
-        config={confirmation}
-        busy={updating}
-        onClose={() => setConfirmation(null)}
-      />
-      {feedback && (
-        <FeedbackToast
-          message={feedback.message}
-          tone={feedback.tone}
-          onClose={() => setFeedback(null)}
-        />
-      )}
     </>
   );
 }
@@ -2120,8 +2072,8 @@ function AdminReportsPage() {
         subtitle="Review recorded sales, transaction history, and inventory activity."
         action={
           <div className="flex flex-col gap-2 sm:flex-row">
-            <Button kind="secondary" onClick={() => void load(true)} disabled={loading}>
-              <RefreshCw size={14} className={loading ? "animate-spin" : ""} /> Refresh
+            <Button kind="secondary" onClick={() => void load(true)} loading={loading}>
+              Refresh
             </Button>
             <Button disabled={!filteredTransactions.length} onClick={exportTransactions}>
               Export transactions
@@ -2420,7 +2372,13 @@ function Dashboard({ role, setPage }: { role: Role; setPage: (p: string) => void
           <div className="mt-4 space-y-3">
             {products.slice(0, 4).map((p) => (
               <div key={p.id} className="flex items-center gap-3 border-b border-[#edf0ea] pb-3">
-                <img src={p.image} alt="" className="size-9 rounded object-cover" />
+                <img
+                  src={p.image}
+                  alt=""
+                  loading="lazy"
+                  decoding="async"
+                  className="size-9 rounded object-cover"
+                />
                 <div className="flex-1">
                   <div className="text-xs font-semibold text-[#334e40]">{p.name}</div>
                   <div className="mt-1 text-[10px] text-[#727e76]">{peso(p.price)}</div>
@@ -2605,6 +2563,8 @@ function ProductSelectionModal({
                     <img
                       src={product.image}
                       alt=""
+                      loading="lazy"
+                      decoding="async"
                       className="size-16 shrink-0 rounded-lg object-cover"
                     />
                     <div className="min-w-0 flex-1">
@@ -2802,6 +2762,8 @@ function PosTerminal() {
                   <img
                     src={product.image}
                     alt=""
+                    loading="lazy"
+                    decoding="async"
                     className="size-14 rounded-lg object-cover sm:size-16"
                   />
                   <div className="min-w-0">
@@ -2901,7 +2863,7 @@ function PosTerminal() {
               {error}
             </div>
           )}
-          <Button disabled={!total || saving} className="mt-5 w-full" onClick={completeSale}>
+          <Button disabled={!total} loading={saving} className="mt-5 w-full" onClick={completeSale}>
             {saving ? "Processing…" : "Complete walk-in sale"}
           </Button>
           <button
@@ -2946,7 +2908,7 @@ function OrderManagementPage() {
   const [statusFilter, setStatusFilter] = useState("All");
   const [dateFilter, setDateFilter] = useState("");
   const [confirmation, setConfirmation] = useState<ConfirmationConfig | null>(null);
-  const [updating, setUpdating] = useState(false);
+  const [updatingOrderId, setUpdatingOrderId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<{ message: string; tone: FeedbackTone } | null>(null);
   const loadOrders = async (showFeedback = false) => {
     setLoading(true);
@@ -2988,7 +2950,7 @@ function OrderManagementPage() {
   const showResolvedOrders =
     statusFilter === "All" || ["Completed", "Cancelled"].includes(statusFilter);
   const changeStatus = async (order: OnlineOrder, status: OrderStatus) => {
-    setUpdating(true);
+    setUpdatingOrderId(order.id);
     try {
       const message =
         status === "Cancelled"
@@ -3024,7 +2986,7 @@ function OrderManagementPage() {
         tone: "error",
       });
     } finally {
-      setUpdating(false);
+      setUpdatingOrderId(null);
     }
   };
   const requestStatusChange = (order: OnlineOrder, status: "Completed" | "Cancelled") => {
@@ -3049,10 +3011,10 @@ function OrderManagementPage() {
           <Button
             kind="secondary"
             onClick={() => void loadOrders(true)}
-            disabled={loading}
+            loading={loading}
             className="gap-2"
           >
-            <RefreshCw size={14} className={loading ? "animate-spin" : ""} /> Refresh orders
+            Refresh orders
           </Button>
         }
       />
@@ -3176,7 +3138,14 @@ function OrderManagementPage() {
                   <div className="flex flex-wrap items-center justify-end gap-2">
                     {order.status === "Awaiting restock" && (
                       <>
-                        <Button kind="secondary" onClick={() => changeStatus(order, "Confirmed")}>
+                        <Button
+                          kind="info"
+                          className="stock-check-action"
+                          loading={updatingOrderId === order.id}
+                          disabled={Boolean(updatingOrderId)}
+                          onClick={() => changeStatus(order, "Confirmed")}
+                        >
+                          <Boxes size={14} />
                           Check stock &amp; confirm
                         </Button>
                         <button
@@ -3188,7 +3157,13 @@ function OrderManagementPage() {
                       </>
                     )}
                     {order.status === "Confirmed" && (
-                      <Button onClick={() => changeStatus(order, "Ready for pickup")}>
+                      <Button
+                        kind="warning"
+                        className="ready-for-pickup-action"
+                        loading={updatingOrderId === order.id}
+                        disabled={Boolean(updatingOrderId)}
+                        onClick={() => changeStatus(order, "Ready for pickup")}
+                      >
                         Ready for pickup
                       </Button>
                     )}
@@ -3247,7 +3222,7 @@ function OrderManagementPage() {
       )}
       <ConfirmationDialog
         config={confirmation}
-        busy={updating}
+        busy={Boolean(updatingOrderId)}
         onClose={() => setConfirmation(null)}
       />
       {feedback && (
@@ -3674,7 +3649,7 @@ function UserManagementPage({ currentUserId }: { currentUserId: string }) {
               </label>
             </div>
             <div className="mt-6 grid gap-2 sm:flex sm:flex-row-reverse sm:justify-start">
-              <Button type="submit" disabled={saving} className="w-full gap-2 sm:w-auto">
+              <Button type="submit" loading={saving} className="w-full gap-2 sm:w-auto">
                 <Save size={14} /> {saving ? "Saving…" : "Save account"}
               </Button>
               <Button
@@ -3705,7 +3680,7 @@ function ManagementPage({ page }: { page: string }) {
   const [stockFilter, setStockFilter] = useState("All");
   const [draft, setDraft] = useState({
     name: "",
-    category: "Notebooks",
+    category: "School Supplies",
     price: "0",
     stock: "0",
     description: "",
@@ -3743,7 +3718,7 @@ function ManagementPage({ page }: { page: string }) {
           }
         : {
             name: "",
-            category: "Notebooks",
+            category: "School Supplies",
             price: "0",
             stock: "0",
             description: "",
@@ -3843,26 +3818,36 @@ function ManagementPage({ page }: { page: string }) {
               </label>
               <label className="field">
                 Category
-                <select
+                <input
+                  list="product-category-suggestions"
                   value={draft.category}
                   onChange={(event) => setDraft({ ...draft, category: event.target.value })}
-                >
-                  <option>Notebooks</option>
-                  <option>Writing</option>
-                  <option>Bundles</option>
-                  <option>Services</option>
-                </select>
+                  placeholder="Type a category"
+                  required
+                />
+                <datalist id="product-category-suggestions">
+                  <option value="Uniforms" />
+                  <option value="PE & Athletics" />
+                  <option value="Identification" />
+                  <option value="Assessment Supplies" />
+                  <option value="School Supplies" />
+                  <option value="Services" />
+                </datalist>
               </label>
               <label className="field">
-                Image
-                <select
+                Image path or URL
+                <input
+                  list="product-image-suggestions"
                   value={draft.image}
                   onChange={(event) => setDraft({ ...draft, image: event.target.value })}
-                >
-                  <option value="/assets/stationery.jpg">Stationery</option>
-                  <option value="/assets/spiral-notebook.jpg">Notebook</option>
-                  <option value="/assets/notebook-pen.jpg">Notebook and pen</option>
-                </select>
+                  placeholder="/assets/image.jpg or https://…"
+                  required
+                />
+                <datalist id="product-image-suggestions">
+                  <option value="/assets/stationery.jpg" />
+                  <option value="/assets/spiral-notebook.jpg" />
+                  <option value="/assets/notebook-pen.jpg" />
+                </datalist>
               </label>
               <label className="field">
                 Price
@@ -3896,7 +3881,7 @@ function ManagementPage({ page }: { page: string }) {
               </label>
             </div>
             <div className="mt-6 grid gap-2 sm:flex sm:flex-row-reverse sm:justify-start">
-              <Button type="submit" disabled={saving} className="w-full sm:w-auto">
+              <Button type="submit" loading={saving} className="w-full sm:w-auto">
                 {saving ? "Saving…" : "Save product"}
               </Button>
               <Button
@@ -4113,8 +4098,9 @@ export default function App() {
   const [sessionChecking, setSessionChecking] = useState(Boolean(storedSession));
   const [page, setPage] = useState("Home");
   const [pageHistory, setPageHistory] = useState<string[]>([]);
-  const [cart, setCart] = useState<Record<number, number>>({ 1: 1, 2: 1 });
+  const [cart, setCart] = useState<Record<number, number>>({});
   const [selected, setSelected] = useState<Product | null>(null);
+  const [selectedQuantity, setSelectedQuantity] = useState(1);
   const [lastPlacedOrder, setLastPlacedOrder] = useState<OnlineOrder | null>(null);
   const [toast, setToast] = useState("");
   const mainRef = useRef<HTMLElement>(null);
@@ -4186,9 +4172,13 @@ export default function App() {
     mainRef.current?.scrollTo({ top: 0, behavior: "smooth" });
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
-  const add = (p: Product) => {
-    setCart((c) => ({ ...c, [p.id]: (c[p.id] || 0) + 1 }));
-    setToast(`${p.name} added to cart`);
+  const add = (p: Product, quantity = 1) => {
+    setCart((c) => ({ ...c, [p.id]: (c[p.id] || 0) + quantity }));
+    setToast(`${quantity}× ${p.name} added to cart`);
+  };
+  const openProduct = (product: Product) => {
+    setSelectedQuantity(1);
+    setSelected(product);
   };
   if (sessionChecking) {
     return (
@@ -4235,9 +4225,11 @@ export default function App() {
 
   const content = (() => {
     if (role === "student") {
-      if (page === "Home") return <StudentHome setPage={navigate} add={add} open={setSelected} />;
-      if (page === "Products") return <ProductsPage add={add} open={setSelected} />;
-      if (page === "Services") return <ProductsPage serviceOnly add={add} open={setSelected} />;
+      if (page === "Home")
+        return <StudentHome setPage={navigate} add={openProduct} open={openProduct} />;
+      if (page === "Products") return <ProductsPage add={openProduct} open={openProduct} />;
+      if (page === "Services")
+        return <ProductsPage serviceOnly add={openProduct} open={openProduct} />;
       if (page === "Cart") return <CartPage cart={cart} setCart={setCart} setPage={navigate} />;
       if (page === "Checkout")
         return (
@@ -4347,6 +4339,7 @@ export default function App() {
               <img
                 src={selected.image}
                 alt={selected.name}
+                decoding="async"
                 className="h-48 w-full object-cover md:h-full md:min-h-64"
               />
               <div className="p-7">
@@ -4365,16 +4358,55 @@ export default function App() {
                   <AvailabilityBadge stock={selected.stock} />
                   <span className="text-[10px] font-semibold text-[#607068]">Campus pickup</span>
                 </div>
+                <div className="mt-4 rounded-xl border border-[#dce2da] bg-[#f8faf7] p-4">
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <div className="text-[10px] font-bold uppercase tracking-[.1em] text-[#718078]">
+                        Quantity
+                      </div>
+                      <div className="mt-1 text-xs text-[#627168]">{peso(selected.price)} each</div>
+                    </div>
+                    <div className="flex min-h-11 items-center overflow-hidden rounded-lg border border-[#cbd3ca] bg-white">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedQuantity((quantity) => Math.max(1, quantity - 1))}
+                        disabled={selectedQuantity <= 1}
+                        className="grid size-11 place-items-center text-[#496155] hover:bg-[#edf2ed] disabled:opacity-35"
+                        aria-label={`Decrease ${selected.name} quantity`}
+                      >
+                        <Minus size={15} />
+                      </button>
+                      <span className="w-10 text-center text-sm font-bold text-[#263f33]">
+                        {selectedQuantity}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setSelectedQuantity((quantity) => Math.min(selected.stock, quantity + 1))
+                        }
+                        disabled={selectedQuantity >= selected.stock}
+                        className="grid size-11 place-items-center text-[#184d37] hover:bg-[#edf2ed] disabled:opacity-35"
+                        aria-label={`Increase ${selected.name} quantity`}
+                      >
+                        <Plus size={15} />
+                      </button>
+                    </div>
+                  </div>
+                  <div className="mt-3 flex items-center justify-between border-t border-[#dde3dc] pt-3 text-sm font-bold text-[#173d2f]">
+                    <span>Subtotal</span>
+                    <span>{peso(selected.price * selectedQuantity)}</span>
+                  </div>
+                </div>
                 <div className="mt-6 flex flex-col gap-2 sm:flex-row-reverse">
                   <Button
                     disabled={selected.stock <= 0}
                     className="w-full sm:flex-1"
                     onClick={() => {
-                      add(selected);
+                      add(selected, selectedQuantity);
                       setSelected(null);
                     }}
                   >
-                    Add to cart
+                    Add {selectedQuantity} to cart · {peso(selected.price * selectedQuantity)}
                   </Button>
                   <Button
                     kind="secondary"

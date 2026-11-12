@@ -5,6 +5,7 @@ import {
   GraduationCap,
   LockKeyhole,
   Mail,
+  RefreshCw,
   ShieldCheck,
   Store,
   UserRound,
@@ -234,6 +235,7 @@ export default function Login({
                 disabled={loading}
                 className="group flex w-full items-center justify-center gap-2 rounded-lg bg-[#184d37] px-4 py-3.5 text-xs font-semibold text-white shadow-[0_8px_22px_rgba(24,77,55,.18)] transition-all duration-300 hover:-translate-y-0.5 hover:bg-[#103d2b] hover:shadow-[0_12px_28px_rgba(24,77,55,.24)] disabled:cursor-wait disabled:opacity-65"
               >
+                {loading && <RefreshCw size={15} className="animate-spin" aria-hidden="true" />}
                 {loading
                   ? mode === "login"
                     ? "Signing in…"

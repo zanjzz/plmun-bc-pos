@@ -13,6 +13,7 @@ export type AppNotification = {
   metadata: Record<string, unknown>;
   readAt: string | null;
   createdAt: string;
+  canDismiss?: boolean;
 };
 
 export async function getNotifications() {
@@ -35,6 +36,10 @@ export async function markNotificationRead(id: string) {
 
 export async function markAllNotificationsRead() {
   return apiRequest<{ updated: number }>("/notifications/read-all", { method: "PUT" }, true);
+}
+
+export async function deleteNotification(id: string) {
+  return apiRequest<{ deleted: true }>(`/notifications/${id}`, { method: "DELETE" }, true);
 }
 
 export function requestNotificationRefresh() {

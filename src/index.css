@@ -205,18 +205,6 @@ html[data-theme="dark"] body::before {
   background: #202325 !important;
 }
 
-[data-theme="dark"] .nav-search-results {
-  border-color: #3b4042 !important;
-  color: #e1e5e2 !important;
-  background: #202325 !important;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.52) !important;
-}
-
-[data-theme="dark"] .nav-search-results button:hover {
-  color: #eef2ef !important;
-  background: #2b302d !important;
-}
-
 [data-theme="dark"] .settings-popover {
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.52) !important;
 }
@@ -270,6 +258,26 @@ html[data-theme="dark"] body::before {
   border-color: #202325 !important;
   color: #fff !important;
   background: #c45c4d !important;
+}
+
+[data-theme="dark"] .ready-for-pickup-action {
+  border-color: #d5ad3f !important;
+  color: #2e240b !important;
+  background: #f4c95d !important;
+}
+
+[data-theme="dark"] .ready-for-pickup-action:hover {
+  background: #e8b93f !important;
+}
+
+[data-theme="dark"] .stock-check-action {
+  border-color: #78a4b5 !important;
+  color: #d7edf5 !important;
+  background: #203943 !important;
+}
+
+[data-theme="dark"] .stock-check-action:hover {
+  background: #294a57 !important;
 }
 
 [data-theme="dark"] .urgent-notification-modal {

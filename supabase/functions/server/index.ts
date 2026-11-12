@@ -80,7 +80,7 @@ const toOrder = (row: any) => ({
   updatedAt: row.updated_at,
 });
 
-const toNotification = (row: any) => ({
+const toNotification = (row: any, canDismiss = false) => ({
   id: row.id,
   type: row.type,
   title: row.title,
@@ -91,7 +91,62 @@ const toNotification = (row: any) => ({
   metadata: row.metadata ?? {},
   readAt: row.read_at,
   createdAt: row.created_at,
+  canDismiss,
 });
+
+async function dismissibleNotificationIds(rows: any[]) {
+  const dismissible = new Set<string>(
+    rows
+      .filter(
+        (row) =>
+          row.type === "transaction" || row.type === "system" || row.metadata?.dismissible === true,
+      )
+      .map((row) => row.id),
+  );
+  const orderNumbers = [
+    ...new Set(
+      rows
+        .filter((row) => row.entity_type === "order" && row.entity_id)
+        .map((row) => row.entity_id),
+    ),
+  ];
+  const productIds = [
+    ...new Set(
+      rows
+        .filter((row) => row.entity_type === "product" && row.entity_id)
+        .map((row) => Number(row.entity_id))
+        .filter(Number.isFinite),
+    ),
+  ];
+  const client = adminClient();
+  const [{ data: orders }, { data: products }] = await Promise.all([
+    orderNumbers.length
+      ? client.from("orders").select("order_number,status").in("order_number", orderNumbers)
+      : Promise.resolve({ data: [] }),
+    productIds.length
+      ? client.from("products").select("id,stock,active").in("id", productIds)
+      : Promise.resolve({ data: [] }),
+  ]);
+  const resolvedOrders = new Set(
+    (orders ?? [])
+      .filter((order: any) => ["Completed", "Cancelled"].includes(order.status))
+      .map((order: any) => order.order_number),
+  );
+  const resolvedProducts = new Set(
+    (products ?? [])
+      .filter((product: any) => product.active === false || Number(product.stock) >= 20)
+      .map((product: any) => String(product.id)),
+  );
+  for (const row of rows) {
+    if (
+      (row.entity_type === "order" && resolvedOrders.has(row.entity_id)) ||
+      (row.entity_type === "product" && resolvedProducts.has(row.entity_id))
+    ) {
+      dismissible.add(row.id);
+    }
+  }
+  return dismissible;
+}
 
 type NotificationInput = {
   eventKey: string;
@@ -552,15 +607,26 @@ app.get(`${prefix}/auth/me`, async (c) => {
 app.get(`${prefix}/notifications`, async (c) => {
   const auth = await authenticatedContext(c);
   if (!auth) return c.json({ error: "Authentication required." }, 401);
-  const { data, error } = await adminClient()
+  const client = adminClient();
+  const retentionCutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  const { error: cleanupError } = await client
+    .from("notifications")
+    .delete()
+    .eq("recipient_id", auth.user.id)
+    .lt("created_at", retentionCutoff);
+  if (cleanupError) console.log("Notification retention cleanup failed:", cleanupError.message);
+  const { data, error } = await client
     .from("notifications")
     .select("*")
     .eq("recipient_id", auth.user.id)
     .order("created_at", { ascending: false })
     .limit(100);
   if (error) return c.json({ error: "Unable to load notifications." }, 500);
+  const dismissibleIds = await dismissibleNotificationIds(data);
   return c.json({
-    notifications: data.map(toNotification),
+    notifications: data.map((notification) =>
+      toNotification(notification, dismissibleIds.has(notification.id)),
+    ),
     unreadCount: data.filter((notification) => !notification.read_at).length,
   });
 });
@@ -590,6 +656,30 @@ app.put(`${prefix}/notifications/:id/read`, async (c) => {
     .single();
   if (error) return c.json({ error: "Notification not found." }, 404);
   return c.json({ notification: toNotification(data) });
+});
+
+app.delete(`${prefix}/notifications/:id`, async (c) => {
+  const auth = await authenticatedContext(c);
+  if (!auth) return c.json({ error: "Authentication required." }, 401);
+  const client = adminClient();
+  const { data: notification, error: findError } = await client
+    .from("notifications")
+    .select("*")
+    .eq("id", c.req.param("id"))
+    .eq("recipient_id", auth.user.id)
+    .maybeSingle();
+  if (findError || !notification) return c.json({ error: "Notification not found." }, 404);
+  const dismissibleIds = await dismissibleNotificationIds([notification]);
+  if (!dismissibleIds.has(notification.id)) {
+    return c.json({ error: "This notification is still active and cannot be removed yet." }, 409);
+  }
+  const { error } = await client
+    .from("notifications")
+    .delete()
+    .eq("id", notification.id)
+    .eq("recipient_id", auth.user.id);
+  if (error) return c.json({ error: "Notification could not be removed." }, 500);
+  return c.json({ deleted: true });
 });
 
 app.get(`${prefix}/users`, async (c) => {
@@ -740,7 +830,7 @@ app.post(`${prefix}/products`, async (c) => {
     .from("products")
     .insert({
       name: String(input.name ?? "").trim(),
-      category: String(input.category ?? "Notebooks"),
+      category: String(input.category ?? "School Supplies"),
       price: Number(input.price ?? 0),
       stock: Number(input.stock ?? 0),
       image: String(input.image ?? "/assets/stationery.jpg"),
@@ -991,19 +1081,12 @@ app.post(`${prefix}/orders`, async (c) => {
 });
 
 app.put(`${prefix}/orders/:id/status`, async (c) => {
-  const auth = await authenticatedContext(c);
-  if (!auth) return c.json({ error: "Your session has expired. Please sign in again." }, 401);
+  const auth = await requireRole(c, ["staff", "admin"]);
+  if (auth.response) return auth.response;
   const order = await fetchOrderByNumber(c.req.param("id"));
   const { status, message } = await c.req.json();
   const allowed = ["Confirmed", "Awaiting restock", "Ready for pickup", "Completed", "Cancelled"];
   if (!allowed.includes(status)) return c.json({ error: "Invalid order status." }, 400);
-  const isStudent = auth.profile.role === "student";
-  if (isStudent && order.user_id !== auth.user.id) {
-    return c.json({ error: "You can only update your own orders." }, 403);
-  }
-  if (isStudent && status !== "Completed") {
-    return c.json({ error: "Students can only confirm that an order was received." }, 403);
-  }
   if (status === "Completed" && order.status === "Completed") {
     await ensureOnlineTransaction(order, auth);
     return c.json({ order: toOrder(order) });
