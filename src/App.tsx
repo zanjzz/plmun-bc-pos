@@ -2173,7 +2173,7 @@ function OrderManagementPage() {
                 {order.status === "Awaiting restock" && (
                   <>
                     <Button kind="secondary" onClick={() => changeStatus(order, "Confirmed")}>
-                      Allocate restock
+                      Check stock &amp; confirm
                     </Button>
                     <button
                       onClick={() => changeStatus(order, "Cancelled")}
@@ -2185,7 +2185,7 @@ function OrderManagementPage() {
                 )}
                 {order.status === "Confirmed" && (
                   <Button onClick={() => changeStatus(order, "Ready for pickup")}>
-                    Mark ready
+                    Ready for pickup
                   </Button>
                 )}
               </div>
