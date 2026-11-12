@@ -1,4 +1,5 @@
 import { apiRequest } from "./api";
+import { requestNotificationRefresh } from "./notifications";
 
 export type OrderStatus =
   | "Pending review"
@@ -39,28 +40,34 @@ export async function createOnlineOrder(input: {
   pickupWindow: string;
   notes: string;
 }) {
-  return (
+  const order = (
     await apiRequest<{ order: OnlineOrder }>(
       "/orders",
       { method: "POST", body: JSON.stringify(input) },
       true,
     )
   ).order;
+  requestNotificationRefresh();
+  return order;
 }
 
 export async function updateOrderStatus(id: string, status: OrderStatus, message?: string) {
-  return (
+  const order = (
     await apiRequest<{ order: OnlineOrder }>(
       `/orders/${id}/status`,
       { method: "PUT", body: JSON.stringify({ status, message }) },
       true,
     )
   ).order;
+  requestNotificationRefresh();
+  return order;
 }
 
 export async function completeWalkInSale(items: Array<{ productId: number; quantity: number }>) {
-  return apiRequest<{
+  const result = await apiRequest<{
     transaction: { id: string; total: number };
     impactedOrders: OnlineOrder[];
   }>("/pos/checkout", { method: "POST", body: JSON.stringify({ items }) }, true);
+  requestNotificationRefresh();
+  return result;
 }

@@ -5,10 +5,8 @@ import {
   GraduationCap,
   LockKeyhole,
   Mail,
-  Moon,
   ShieldCheck,
   Store,
-  Sun,
   UserRound,
 } from "lucide-react";
 import { useState } from "react";
@@ -40,11 +38,9 @@ const roleDetails: Record<
 export default function Login({
   onAuthenticated,
   theme,
-  onToggleTheme,
 }: {
   onAuthenticated: (user: AuthUser) => void;
   theme: Theme;
-  onToggleTheme: () => void;
 }) {
   const [mode, setMode] = useState<"login" | "register">("login");
   const [name, setName] = useState("");
@@ -85,14 +81,6 @@ export default function Login({
       data-theme={theme}
       className="login-shell relative min-h-screen overflow-hidden bg-[#edf0e8] p-3 transition-colors duration-300 sm:p-6 lg:p-8"
     >
-      <button
-        type="button"
-        onClick={onToggleTheme}
-        className="theme-toggle absolute right-6 top-6 z-20 grid size-10 place-items-center rounded-xl border border-white/50 bg-white/75 text-[#385347] shadow-sm backdrop-blur transition hover:-translate-y-0.5"
-        aria-label={`Switch to ${theme === "light" ? "dark" : "light"} mode`}
-      >
-        {theme === "light" ? <Moon size={17} /> : <Sun size={17} />}
-      </button>
       <div className="pointer-events-none absolute -right-32 -top-40 size-[620px] rounded-full bg-[#d3dfd2]/70 blur-3xl" />
       <div className="pointer-events-none absolute -bottom-52 -left-32 size-[620px] rounded-full bg-[#e4dcc8]/70 blur-3xl" />
 

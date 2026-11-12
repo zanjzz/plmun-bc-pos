@@ -80,6 +80,179 @@ const toOrder = (row: any) => ({
   updatedAt: row.updated_at,
 });
 
+const toNotification = (row: any) => ({
+  id: row.id,
+  type: row.type,
+  title: row.title,
+  message: row.message,
+  actionPage: row.action_page,
+  entityType: row.entity_type,
+  entityId: row.entity_id,
+  metadata: row.metadata ?? {},
+  readAt: row.read_at,
+  createdAt: row.created_at,
+});
+
+type NotificationInput = {
+  eventKey: string;
+  type: "order" | "inventory" | "transaction" | "system";
+  title: string;
+  message: string;
+  actionPage?: string;
+  entityType?: string;
+  entityId?: string;
+  metadata?: Record<string, unknown>;
+};
+
+async function notifyRecipients(
+  recipients: Array<{ id: string; role: string }>,
+  input: NotificationInput,
+) {
+  if (!recipients.length) return;
+  const rows = recipients.map((recipient) => ({
+    recipient_id: recipient.id,
+    recipient_role: recipient.role,
+    event_key: input.eventKey,
+    type: input.type,
+    title: input.title,
+    message: input.message,
+    action_page: input.actionPage ?? null,
+    entity_type: input.entityType ?? null,
+    entity_id: input.entityId ?? null,
+    metadata: input.metadata ?? {},
+  }));
+  const { error } = await adminClient()
+    .from("notifications")
+    .upsert(rows, { onConflict: "recipient_id,event_key", ignoreDuplicates: true });
+  if (error) console.log("Notification insert failed:", error.message);
+}
+
+async function notifyUser(userId: string, role: string, input: NotificationInput) {
+  await notifyRecipients([{ id: userId, role }], input);
+}
+
+async function notifyRoles(roles: string[], input: NotificationInput) {
+  const { data, error } = await adminClient()
+    .from("profiles")
+    .select("id,role")
+    .in("role", roles)
+    .eq("active", true);
+  if (error) {
+    console.log("Notification recipient lookup failed:", error.message);
+    return;
+  }
+  await notifyRecipients(data ?? [], input);
+}
+
+const studentStatusCopy: Record<string, { title: string; message: (order: any) => string }> = {
+  "Pending review": {
+    title: "Order submitted",
+    message: (order) => `${order.order_number} was received and is awaiting stock confirmation.`,
+  },
+  Confirmed: {
+    title: "Order confirmed",
+    message: (order) => `${order.order_number} is confirmed and will be prepared for pickup.`,
+  },
+  "Awaiting restock": {
+    title: "Order needs attention",
+    message: (order) =>
+      `${order.order_number} has a stock issue. ${order.status_message || "We’ll update you when stock is available."}`,
+  },
+  "Ready for pickup": {
+    title: "Order ready for pickup",
+    message: (order) => `${order.order_number} is ready at the Business Center counter.`,
+  },
+  Completed: {
+    title: "Order completed",
+    message: (order) => `${order.order_number} has been completed. Thank you for your order.`,
+  },
+  Cancelled: {
+    title: "Order cancelled",
+    message: (order) =>
+      `${order.order_number} was cancelled. ${order.status_message || "Contact the Business Center if you need help."}`,
+  },
+};
+
+async function notifyOrderStatus(order: any, eventId: string) {
+  const copy = studentStatusCopy[order.status];
+  if (copy) {
+    await notifyUser(order.user_id, "student", {
+      eventKey: `order:${order.id}:status:${eventId}:student`,
+      type: "order",
+      title: copy.title,
+      message: copy.message(order),
+      actionPage: "My orders",
+      entityType: "order",
+      entityId: order.order_number,
+      metadata: { status: order.status, urgent: order.status === "Awaiting restock" },
+    });
+  }
+
+  if (order.status === "Awaiting restock" || order.status === "Cancelled") {
+    await notifyRoles(["staff"], {
+      eventKey: `order:${order.id}:status:${eventId}:staff`,
+      type: "order",
+      title:
+        order.status === "Awaiting restock" ? "Stock conflict needs review" : "Order cancelled",
+      message: `${order.order_number}: ${order.status_message}`,
+      actionPage: "Order management",
+      entityType: "order",
+      entityId: order.order_number,
+      metadata: { status: order.status, urgent: order.status === "Awaiting restock" },
+    });
+    await notifyRoles(["admin"], {
+      eventKey: `order:${order.id}:status:${eventId}:admin`,
+      type: "order",
+      title:
+        order.status === "Awaiting restock"
+          ? "Order conflict requires oversight"
+          : "Order cancellation recorded",
+      message: `${order.order_number}: ${order.status_message}`,
+      actionPage: "Dashboard",
+      entityType: "order",
+      entityId: order.order_number,
+      metadata: { status: order.status, urgent: order.status === "Awaiting restock" },
+    });
+  }
+}
+
+async function notifyInventoryLevel(
+  product: { id: number; name: string; stock: number },
+  previousStock: number,
+  eventKey: string,
+) {
+  const restored = previousStock < 20 && product.stock >= 20;
+  if (product.stock >= 20 && !restored) return;
+  const title = restored
+    ? "Inventory restored"
+    : product.stock <= 0
+      ? "Product out of stock"
+      : "Low stock warning";
+  const message = restored
+    ? `${product.name} is back to ${product.stock} units.`
+    : `${product.name} has ${product.stock} ${product.stock === 1 ? "unit" : "units"} remaining.`;
+  await notifyRoles(["staff"], {
+    eventKey: `${eventKey}:staff`,
+    type: "inventory",
+    title,
+    message,
+    actionPage: "Dashboard",
+    entityType: "product",
+    entityId: String(product.id),
+    metadata: { stock: product.stock, urgent: product.stock <= 0 },
+  });
+  await notifyRoles(["admin"], {
+    eventKey: `${eventKey}:admin`,
+    type: "inventory",
+    title,
+    message,
+    actionPage: "Inventory management",
+    entityType: "product",
+    entityId: String(product.id),
+    metadata: { stock: product.stock, urgent: product.stock <= 0 },
+  });
+}
+
 async function getOrCreateProfile(user: any) {
   const client = adminClient();
   const { data: existing, error } = await client
@@ -158,7 +331,7 @@ async function recordStatus(
   message: string,
   actorId?: string,
 ) {
-  const { error } = await adminClient()
+  const { data, error } = await adminClient()
     .from("order_status_history")
     .insert({
       order_id: orderId,
@@ -166,8 +339,11 @@ async function recordStatus(
       to_status: toStatus,
       message,
       changed_by: actorId ?? null,
-    });
+    })
+    .select("id")
+    .single();
   if (error) throw error;
+  return data;
 }
 
 async function reconcileOnlineOrders() {
@@ -208,8 +384,10 @@ async function reconcileOnlineOrders() {
         .update({ status, status_message: message })
         .eq("id", order.id);
       if (error) throw error;
-      await recordStatus(order.id, order.status, status, message);
-      changed.push({ ...order, status, status_message: message });
+      const history = await recordStatus(order.id, order.status, status, message);
+      const changedOrder = { ...order, status, status_message: message };
+      await notifyOrderStatus(changedOrder, history.id);
+      changed.push(changedOrder);
     }
   }
   return changed;
@@ -331,6 +509,49 @@ app.get(`${prefix}/auth/me`, async (c) => {
   const auth = await authenticatedContext(c);
   if (!auth) return c.json({ error: "Session expired." }, 401);
   return c.json({ user: toUser(auth.user, auth.profile) });
+});
+
+app.get(`${prefix}/notifications`, async (c) => {
+  const auth = await authenticatedContext(c);
+  if (!auth) return c.json({ error: "Authentication required." }, 401);
+  const { data, error } = await adminClient()
+    .from("notifications")
+    .select("*")
+    .eq("recipient_id", auth.user.id)
+    .order("created_at", { ascending: false })
+    .limit(100);
+  if (error) return c.json({ error: "Unable to load notifications." }, 500);
+  return c.json({
+    notifications: data.map(toNotification),
+    unreadCount: data.filter((notification) => !notification.read_at).length,
+  });
+});
+
+app.put(`${prefix}/notifications/read-all`, async (c) => {
+  const auth = await authenticatedContext(c);
+  if (!auth) return c.json({ error: "Authentication required." }, 401);
+  const { data, error } = await adminClient()
+    .from("notifications")
+    .update({ read_at: new Date().toISOString() })
+    .eq("recipient_id", auth.user.id)
+    .is("read_at", null)
+    .select("id");
+  if (error) return c.json({ error: "Unable to update notifications." }, 500);
+  return c.json({ updated: data.length });
+});
+
+app.put(`${prefix}/notifications/:id/read`, async (c) => {
+  const auth = await authenticatedContext(c);
+  if (!auth) return c.json({ error: "Authentication required." }, 401);
+  const { data, error } = await adminClient()
+    .from("notifications")
+    .update({ read_at: new Date().toISOString() })
+    .eq("id", c.req.param("id"))
+    .eq("recipient_id", auth.user.id)
+    .select()
+    .single();
+  if (error) return c.json({ error: "Notification not found." }, 404);
+  return c.json({ notification: toNotification(data) });
 });
 
 app.get(`${prefix}/users`, async (c) => {
@@ -479,6 +700,11 @@ app.post(`${prefix}/products`, async (c) => {
     .select()
     .single();
   if (error) return c.json({ error: error.message }, 400);
+  await notifyInventoryLevel(
+    toProduct(data),
+    Number(data.stock),
+    `product:${data.id}:created:${data.created_at}`,
+  );
   return c.json({ product: toProduct(data) }, 201);
 });
 
@@ -513,6 +739,11 @@ app.put(`${prefix}/products/:id`, async (c) => {
         reference_type: "product update",
         actor_id: auth.profile.id,
       });
+    await notifyInventoryLevel(
+      toProduct(data),
+      Number(previous.stock),
+      `product:${id}:stock:${data.updated_at}`,
+    );
     await reconcileOnlineOrders();
   }
   return c.json({ product: toProduct(data) });
@@ -521,11 +752,32 @@ app.put(`${prefix}/products/:id`, async (c) => {
 app.delete(`${prefix}/products/:id`, async (c) => {
   const auth = await requireRole(c, ["admin"]);
   if (auth.response) return auth.response;
-  const { error } = await adminClient()
-    .from("products")
-    .update({ active: false })
-    .eq("id", Number(c.req.param("id")));
+  const id = Number(c.req.param("id"));
+  const { data: product } = await adminClient().from("products").select("*").eq("id", id).single();
+  if (!product?.active) return c.json({ deleted: true });
+  const { error } = await adminClient().from("products").update({ active: false }).eq("id", id);
   if (error) return c.json({ error: error.message }, 400);
+  await notifyRoles(["staff"], {
+    eventKey: `product:${id}:deactivated:staff`,
+    type: "inventory",
+    title: "Product unavailable",
+    message: `${product.name} was removed from active inventory.`,
+    actionPage: "Dashboard",
+    entityType: "product",
+    entityId: String(id),
+    metadata: { urgent: true, stock: Number(product.stock) },
+  });
+  await notifyRoles(["admin"], {
+    eventKey: `product:${id}:deactivated:admin`,
+    type: "inventory",
+    title: "Product removed",
+    message: `${product.name} was removed from active inventory.`,
+    actionPage: "Inventory management",
+    entityType: "product",
+    entityId: String(id),
+    metadata: { urgent: true, stock: Number(product.stock) },
+  });
+  await reconcileOnlineOrders();
   return c.json({ deleted: true });
 });
 
@@ -589,13 +841,39 @@ app.post(`${prefix}/orders`, async (c) => {
     await adminClient().from("orders").delete().eq("id", order.id);
     return c.json({ error: "Unable to save the order items." }, 500);
   }
-  await recordStatus(
+  const pendingHistory = await recordStatus(
     order.id,
     null,
     "Pending review",
     "Order submitted for stock confirmation.",
     auth.user.id,
   );
+  await notifyOrderStatus(
+    {
+      ...order,
+      status: "Pending review",
+      status_message: "Order submitted for stock confirmation.",
+    },
+    pendingHistory.id,
+  );
+  await notifyRoles(["staff"], {
+    eventKey: `order:${order.id}:created:staff`,
+    type: "order",
+    title: "New online order received",
+    message: `${orderNumber} is ready for review.`,
+    actionPage: "Order management",
+    entityType: "order",
+    entityId: orderNumber,
+  });
+  await notifyRoles(["admin"], {
+    eventKey: `order:${order.id}:created:admin`,
+    type: "order",
+    title: "New online order",
+    message: `${orderNumber} was submitted with a total of ₱${total.toFixed(2)}.`,
+    actionPage: "Dashboard",
+    entityType: "order",
+    entityId: orderNumber,
+  });
   await reconcileOnlineOrders();
   return c.json({ order: toOrder(await fetchOrderByNumber(orderNumber)) }, 201);
 });
@@ -644,6 +922,11 @@ app.put(`${prefix}/orders/:id/status`, async (c) => {
           reference_id: order.order_number,
           actor_id: auth.profile.id,
         });
+      await notifyInventoryLevel(
+        { id: Number(product.id), name: product.name, stock: stockAfter },
+        Number(product.stock),
+        `order:${order.id}:product:${product.id}:fulfilled`,
+      );
     }
   }
 
@@ -653,7 +936,14 @@ app.put(`${prefix}/orders/:id/status`, async (c) => {
     .update({ status, status_message: statusMessage })
     .eq("id", order.id);
   if (error) return c.json({ error: "Unable to update the order." }, 500);
-  await recordStatus(order.id, order.status, status, statusMessage, auth.profile.id);
+  const history = await recordStatus(
+    order.id,
+    order.status,
+    status,
+    statusMessage,
+    auth.profile.id,
+  );
+  await notifyOrderStatus({ ...order, status, status_message: statusMessage }, history.id);
   if (["Cancelled", "Completed", "Ready for pickup"].includes(status)) {
     await reconcileOnlineOrders();
   }
@@ -717,10 +1007,35 @@ app.post(`${prefix}/pos/checkout`, async (c) => {
         reference_id: transactionNumber,
         actor_id: auth.profile.id,
       });
+    await notifyInventoryLevel(
+      { id: Number(product.id), name: product.name, stock: stockAfter },
+      Number(product.stock),
+      `transaction:${transaction.id}:product:${product.id}:stock`,
+    );
   }
   const impacted = (await reconcileOnlineOrders()).filter(
     (order) => order.status === "Awaiting restock",
   );
+  await notifyUser(auth.profile.id, auth.profile.role, {
+    eventKey: `transaction:${transaction.id}:completed:actor`,
+    type: "transaction",
+    title: "Transaction completed",
+    message: `${transactionNumber} was completed for ₱${total.toFixed(2)}.`,
+    actionPage: "POS terminal",
+    entityType: "transaction",
+    entityId: transactionNumber,
+  });
+  if (auth.profile.role !== "admin") {
+    await notifyRoles(["admin"], {
+      eventKey: `transaction:${transaction.id}:completed:admin`,
+      type: "transaction",
+      title: "Walk-in transaction completed",
+      message: `${transactionNumber} was completed for ₱${total.toFixed(2)}.`,
+      actionPage: "Transaction history",
+      entityType: "transaction",
+      entityId: transactionNumber,
+    });
+  }
   return c.json({
     transaction: { id: transactionNumber, total },
     impactedOrders: impacted.map(toOrder),

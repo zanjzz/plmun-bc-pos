@@ -1,9 +1,11 @@
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   AlertTriangle,
   ArrowLeft,
   ArrowRight,
   BarChart3,
+  Bell,
   Boxes,
   CheckCircle2,
   ClipboardList,
@@ -16,19 +18,24 @@ import {
   Mail,
   MapPin,
   Menu,
+  Minus,
   Moon,
   Package,
   PackageCheck,
   Printer,
+  Plus,
+  RotateCcw,
   Save,
   ScanLine,
   Search,
+  Settings,
   ShieldCheck,
   ShoppingBag,
   ShoppingCart,
   Sparkles,
   Store,
   Sun,
+  Trash2,
   UserPlus,
   Users,
   UserX,
@@ -39,6 +46,12 @@ import {
 } from "lucide-react";
 import { type AuthUser, authProvider, readStoredSession, type Role } from "./auth";
 import Login from "./Login";
+import {
+  type AppNotification,
+  getNotifications,
+  markAllNotificationsRead,
+  markNotificationRead,
+} from "./notifications";
 import {
   completeWalkInSale,
   createOnlineOrder,
@@ -52,6 +65,8 @@ import {
   deleteProduct,
   fallbackProducts,
   getProducts,
+  isPhysicalProduct,
+  isServiceProduct,
   type Product,
   updateProduct,
 } from "./products";
@@ -169,6 +184,277 @@ function ThemeToggle({ theme, onToggle }: { theme: Theme; onToggle: () => void }
   );
 }
 
+const notificationTime = (value: string) => {
+  const elapsed = Date.now() - new Date(value).getTime();
+  const minutes = Math.max(1, Math.floor(elapsed / 60000));
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return days < 7 ? `${days}d ago` : new Date(value).toLocaleDateString();
+};
+
+function NotificationCenter({
+  user,
+  setPage,
+}: {
+  user: AuthUser;
+  setPage: (page: string) => void;
+}) {
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [urgent, setUrgent] = useState<AppNotification | null>(null);
+  const [suppressUrgent, setSuppressUrgent] = useState(false);
+  const urgentPreferenceKey = `plmun-hide-urgent-notifications-${user.id}`;
+
+  useEffect(() => {
+    let active = true;
+    const load = async () => {
+      try {
+        const result = await getNotifications();
+        if (!active) return;
+        setNotifications(result.notifications);
+        setUnreadCount(result.unreadCount);
+        setError("");
+        const urgentPopupsDisabled = window.localStorage.getItem(urgentPreferenceKey) === "true";
+        if (!urgentPopupsDisabled) {
+          const nextUrgent = result.notifications.find(
+            (notification) => !notification.readAt && notification.metadata.urgent === true,
+          );
+          setUrgent((current) => current ?? nextUrgent ?? null);
+        }
+      } catch (reason) {
+        if (active) {
+          setError(reason instanceof Error ? reason.message : "Notifications are unavailable.");
+        }
+      } finally {
+        if (active) setLoading(false);
+      }
+    };
+    const refresh = () => void load();
+    void load();
+    const interval = window.setInterval(load, 30000);
+    window.addEventListener("notifications:refresh", refresh);
+    window.addEventListener("focus", refresh);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+      window.removeEventListener("notifications:refresh", refresh);
+      window.removeEventListener("focus", refresh);
+    };
+  }, [urgentPreferenceKey]);
+
+  const readNotification = async (notification: AppNotification, navigate = true) => {
+    if (!notification.readAt) {
+      try {
+        const updated = await markNotificationRead(notification.id);
+        setNotifications((current) =>
+          current.map((item) => (item.id === updated.id ? updated : item)),
+        );
+        setUnreadCount((current) => Math.max(0, current - 1));
+      } catch {
+        return;
+      }
+    }
+    setUrgent(null);
+    setOpen(false);
+    if (navigate && notification.actionPage) setPage(notification.actionPage);
+  };
+
+  const dismissUrgent = async () => {
+    if (!urgent) return;
+    if (suppressUrgent) {
+      window.localStorage.setItem(urgentPreferenceKey, "true");
+    }
+    await readNotification(urgent, false);
+    setSuppressUrgent(false);
+  };
+
+  const reviewUrgent = async () => {
+    if (!urgent) return;
+    if (suppressUrgent) {
+      window.localStorage.setItem(urgentPreferenceKey, "true");
+    }
+    await readNotification(urgent);
+    setSuppressUrgent(false);
+  };
+
+  const markAllRead = async () => {
+    try {
+      await markAllNotificationsRead();
+      const readAt = new Date().toISOString();
+      setNotifications((current) =>
+        current.map((notification) => ({ ...notification, readAt: notification.readAt ?? readAt })),
+      );
+      setUnreadCount(0);
+      setUrgent(null);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Notifications could not be updated.");
+    }
+  };
+
+  const notificationIcon = (notification: AppNotification) => {
+    if (notification.type === "inventory") return <Boxes size={16} className="icon-warning" />;
+    if (notification.type === "transaction")
+      return <ShoppingCart size={16} className="icon-info" />;
+    if (notification.type === "order") return <PackageCheck size={16} className="icon-success" />;
+    return <Bell size={16} className="icon-info" />;
+  };
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+        className="notification-trigger relative grid size-11 place-items-center rounded-lg border border-[#d8ddd4] bg-white text-[#40564b] transition hover:border-[#92a397] hover:bg-[#edf1ec]"
+        aria-label={`Notifications${unreadCount ? `, ${unreadCount} unread` : ""}`}
+        aria-expanded={open}
+      >
+        <Bell size={18} />
+        {unreadCount > 0 && (
+          <span className="notification-count absolute -right-1 -top-1 grid min-h-5 min-w-5 place-items-center rounded-full border-2 border-white bg-[#a13f32] px-1 text-[9px] font-bold leading-none text-white">
+            {unreadCount > 99 ? "99+" : unreadCount}
+          </span>
+        )}
+      </button>
+
+      {open &&
+        createPortal(
+          <>
+            <button
+              className="fixed inset-0 z-[90] cursor-default bg-black/10 backdrop-blur-[1px]"
+              onClick={() => setOpen(false)}
+              aria-label="Close notifications"
+            />
+            <section
+              role="dialog"
+              aria-label="Notifications"
+              className="notification-panel fixed z-[100] flex max-h-[min(72dvh,620px)] w-[min(410px,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-2xl border border-[#d8ded6] bg-white shadow-[0_24px_80px_rgba(18,43,31,.24)]"
+            >
+              <header className="flex items-center justify-between gap-4 border-b border-[#e1e5df] px-4 py-4">
+                <div>
+                  <h2 className="text-base font-semibold text-[#193f31]">Notifications</h2>
+                  <p className="mt-0.5 text-[10px] text-[#68766e]">
+                    {unreadCount ? `${unreadCount} unread` : "You’re all caught up"}
+                  </p>
+                </div>
+                {unreadCount > 0 && (
+                  <button
+                    onClick={markAllRead}
+                    className="min-h-10 rounded-lg px-3 text-[10px] font-bold text-[#285c43] hover:bg-[#eaf1eb]"
+                  >
+                    Mark all as read
+                  </button>
+                )}
+              </header>
+              <div className="overflow-y-auto">
+                {notifications.map((notification) => (
+                  <button
+                    key={notification.id}
+                    onClick={() => readNotification(notification)}
+                    className={`notification-item flex min-h-24 w-full gap-3 border-b border-[#e7eae5] p-4 text-left transition ${
+                      notification.readAt ? "bg-white" : "bg-[#f0f6ef]"
+                    }`}
+                  >
+                    <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-white shadow-sm">
+                      {notificationIcon(notification)}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="flex items-start justify-between gap-3">
+                        <span className="text-xs font-bold text-[#29473a]">
+                          {notification.title}
+                        </span>
+                        {!notification.readAt && (
+                          <span className="mt-1 size-2 shrink-0 rounded-full bg-[#2f7651]" />
+                        )}
+                      </span>
+                      <span className="mt-1 block text-[11px] leading-5 text-[#5e6d64]">
+                        {notification.message}
+                      </span>
+                      <span className="mt-1.5 block text-[10px] font-semibold text-[#78857d]">
+                        {notificationTime(notification.createdAt)}
+                      </span>
+                    </span>
+                  </button>
+                ))}
+                {!loading && !notifications.length && (
+                  <div className="grid min-h-52 place-items-center p-8 text-center">
+                    <div>
+                      <span className="mx-auto grid size-12 place-items-center rounded-full bg-[#edf2ec] text-[#64756c]">
+                        <Bell size={20} />
+                      </span>
+                      <h3 className="mt-3 text-sm font-semibold text-[#334d40]">
+                        No notifications yet
+                      </h3>
+                      <p className="mt-1 text-xs text-[#69766e]">
+                        Relevant updates will appear here.
+                      </p>
+                    </div>
+                  </div>
+                )}
+                {loading && (
+                  <div className="p-10 text-center text-xs text-[#68766e]">
+                    Loading notifications…
+                  </div>
+                )}
+                {error && (
+                  <div className="m-3 rounded-lg border border-[#dfc6bd] bg-[#fbefeb] p-3 text-xs text-[#8b4333]">
+                    {error}
+                  </div>
+                )}
+              </div>
+            </section>
+          </>,
+          document.body,
+        )}
+
+      {urgent &&
+        createPortal(
+          <div className="fixed inset-0 z-[120] flex items-center justify-center bg-[#07110c]/65 p-4 backdrop-blur-sm">
+            <section
+              role="alertdialog"
+              aria-modal="true"
+              aria-labelledby="urgent-notification-title"
+              className="urgent-notification-modal w-full max-w-md rounded-2xl border border-[#e1d09a] bg-white p-6 shadow-[0_30px_100px_rgba(0,0,0,.4)]"
+            >
+              <span className="grid size-11 place-items-center rounded-xl bg-[#f5edc9]">
+                <AlertTriangle size={20} className="icon-warning" />
+              </span>
+              <h2
+                id="urgent-notification-title"
+                className="mt-4 text-xl font-semibold text-[#253f33]"
+              >
+                {urgent.title}
+              </h2>
+              <p className="mt-2 text-sm leading-6 text-[#5f6d65]">{urgent.message}</p>
+              <label className="mt-5 flex min-h-11 cursor-pointer items-center gap-3 rounded-lg border border-[#d9ded7] bg-[#f7f8f5] px-3 text-xs font-semibold text-[#526159]">
+                <input
+                  type="checkbox"
+                  checked={suppressUrgent}
+                  onChange={(event) => setSuppressUrgent(event.target.checked)}
+                  className="size-4 accent-[#184d37]"
+                />
+                Don’t show urgent popups again
+              </label>
+              <div className="mt-5 flex flex-col gap-2 sm:flex-row-reverse">
+                <Button className="w-full sm:flex-1" onClick={reviewUrgent}>
+                  Review now
+                </Button>
+                <Button kind="secondary" className="w-full sm:flex-1" onClick={dismissUrgent}>
+                  Dismiss
+                </Button>
+              </div>
+            </section>
+          </div>,
+          document.body,
+        )}
+    </>
+  );
+}
+
 function Mark() {
   return (
     <div className="flex items-center gap-2.5">
@@ -229,15 +515,17 @@ function Pill({
 }) {
   const color =
     tone === "green"
-      ? "bg-[#dfe9dc] text-[#174733]"
+      ? "status-pill-green"
       : tone === "amber"
-        ? "bg-[#f1edd5] text-[#685d21]"
-        : "bg-[#eceeea] text-[#5b655e]";
-  return (
-    <span className={`inline-flex rounded-full px-2.5 py-1 text-[10px] font-semibold ${color}`}>
-      {children}
-    </span>
-  );
+        ? "status-pill-amber"
+        : "status-pill-gray";
+  return <span className={`status-pill ${color}`}>{children}</span>;
+}
+
+function AvailabilityBadge({ stock }: { stock: number }) {
+  if (stock <= 0) return <span className="status-badge status-unavailable">Out of stock</span>;
+  if (stock < 20) return <span className="status-badge status-low">{stock} left</span>;
+  return <span className="status-badge status-available">{stock} available</span>;
 }
 
 function Header({
@@ -259,6 +547,8 @@ function Header({
 }) {
   const role = user.role;
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const settingsRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!mobileOpen) return;
     const previous = document.body.style.overflow;
@@ -272,9 +562,24 @@ function Header({
       window.removeEventListener("keydown", closeOnEscape);
     };
   }, [mobileOpen]);
+  useEffect(() => {
+    if (!settingsOpen) return;
+    const closeSettings = (event: PointerEvent) => {
+      if (!settingsRef.current?.contains(event.target as Node)) setSettingsOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setSettingsOpen(false);
+    };
+    document.addEventListener("pointerdown", closeSettings);
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeSettings);
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [settingsOpen]);
   return (
     <header className="site-header sticky top-0 z-30 border-b border-[#dfe1d8]/80 bg-[#fbfcf7]/90 shadow-[0_1px_12px_rgba(28,61,45,.04)] backdrop-blur-xl">
-      <div className="mx-auto flex h-[68px] max-w-[1500px] items-center gap-2 px-3 sm:h-[72px] sm:gap-5 sm:px-7 lg:gap-7">
+      <div className="mx-auto flex h-[68px] max-w-[1500px] items-center gap-2 px-3 sm:h-[72px] sm:gap-3 sm:px-7 lg:gap-4">
         <button
           onClick={() => setPage(role === "student" ? "Home" : "Dashboard")}
           aria-label="Go to dashboard"
@@ -287,14 +592,18 @@ function Header({
               <button
                 key={item}
                 onClick={() => setPage(item)}
-                className={`h-full border-b-2 px-3 text-xs font-semibold transition-colors ${page === item ? "border-[#184d37] text-[#184d37]" : "border-transparent text-[#687168] hover:text-[#184d37]"}`}
+                className={`h-full border-b-2 px-2.5 text-xs font-semibold transition-colors ${page === item ? "border-[#184d37] text-[#184d37]" : "border-transparent text-[#687168] hover:text-[#184d37]"}`}
               >
                 {item}
               </button>
             ))}
           </nav>
         )}
-        <label className="relative ml-auto hidden w-full max-w-[260px] md:block">
+        <label
+          className={`relative ml-auto hidden w-full max-w-[260px] ${
+            role === "student" ? "xl:block" : "lg:block"
+          }`}
+        >
           <Search
             size={15}
             className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#8d958b]"
@@ -305,102 +614,150 @@ function Header({
             placeholder="Search the system"
           />
         </label>
-        {role === "student" && (
-          <button
-            onClick={() => setPage("Cart")}
-            className="relative grid size-11 place-items-center rounded-lg text-[#374c42] transition hover:bg-[#edf0e8]"
-            aria-label={`Shopping cart with ${cartCount} items`}
-          >
-            <ShoppingBag size={18} />
-            <span className="absolute right-0.5 top-0.5 min-w-4 rounded-full bg-[#184d37] px-1 py-0.5 text-center text-[8px] font-bold leading-none text-white">
-              {cartCount}
-            </span>
-          </button>
-        )}
-        <ThemeToggle theme={theme} onToggle={onToggleTheme} />
-        <div className="hidden text-right sm:block">
-          <div className="text-[11px] font-semibold text-[#263d32]">{user.name}</div>
-          <div className="text-[9px] capitalize text-[#899087]">{role}</div>
-        </div>
-        <button
-          onClick={onSignOut}
-          className="hidden items-center gap-1.5 rounded-lg border border-[#d8ddd4] px-3 py-2 text-[10px] font-semibold text-[#486056] transition hover:border-[#184d37] hover:bg-white sm:flex"
-        >
-          <LogOut size={13} /> Sign out
-        </button>
-        <button
-          onClick={() => setMobileOpen(!mobileOpen)}
-          className="grid size-11 place-items-center rounded-lg border border-[#d8ddd4] text-[#375446] lg:hidden"
-          aria-label="Open navigation"
-          aria-expanded={mobileOpen}
-        >
-          <Menu size={17} />
-        </button>
-      </div>
-      {mobileOpen && (
-        <div
-          className="mobile-menu-backdrop fixed inset-0 z-50 grid place-items-center bg-[#07110c]/55 p-4 backdrop-blur-sm lg:hidden"
-          onMouseDown={() => setMobileOpen(false)}
-        >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-label="Navigation menu"
-            className="mobile-menu-dialog max-h-[calc(100dvh-2rem)] w-full max-w-sm overflow-y-auto rounded-2xl border border-white/20 bg-white p-4 shadow-[0_24px_80px_rgba(0,0,0,.28)]"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <div className="mb-3 flex items-center justify-between px-1">
-              <div className="flex items-center gap-3">
-                <img
-                  src="/assets/plmun-logo.png"
-                  alt="PLMun seal"
-                  className="size-10 object-contain"
-                />
-                <div>
-                  <div className="text-xs font-semibold text-[#1f4032]">Navigation</div>
-                  <div className="mt-0.5 text-[9px] capitalize text-[#839087]">{role} account</div>
-                </div>
-              </div>
-              <button
-                onClick={() => setMobileOpen(false)}
-                className="grid size-11 place-items-center rounded-xl text-[#65766c] hover:bg-[#eef1eb]"
-                aria-label="Close menu"
-              >
-                <X size={19} />
-              </button>
-            </div>
-            <nav className="space-y-1.5">
-              {navByRole[role].map((item) => {
-                const Icon = navIcons[item] ?? ArrowRight;
-                return (
-                  <button
-                    key={item}
-                    onClick={() => {
-                      setPage(item);
-                      setMobileOpen(false);
-                    }}
-                    className={`flex min-h-12 w-full items-center gap-3 rounded-xl px-3.5 py-3 text-left text-sm font-semibold transition ${page === item ? "bg-[#e8efe8] text-[#184d37]" : "text-[#4d6056] hover:bg-[#f0f2ed]"}`}
-                  >
-                    <span className="grid size-8 place-items-center rounded-lg bg-white shadow-sm">
-                      <Icon size={16} />
-                    </span>
-                    {item}
-                  </button>
-                );
-              })}
-            </nav>
+        <div className="ml-auto flex shrink-0 items-center gap-1.5 sm:gap-2 md:ml-0">
+          {role === "student" && (
             <button
-              onClick={() => {
-                setMobileOpen(false);
-                onSignOut();
-              }}
-              className="mt-4 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-[#d8ddd4] px-3 py-3 text-xs font-semibold text-[#6b4a42]"
+              onClick={() => setPage("Cart")}
+              className="relative grid size-11 place-items-center rounded-lg text-[#374c42] transition hover:bg-[#edf0e8]"
+              aria-label={`Shopping cart with ${cartCount} items`}
             >
-              <LogOut size={15} /> Sign out
+              <ShoppingCart size={18} />
+              <span className="absolute right-0.5 top-0.5 min-w-4 rounded-full bg-[#184d37] px-1 py-0.5 text-center text-[8px] font-bold leading-none text-white">
+                {cartCount}
+              </span>
+            </button>
+          )}
+          <NotificationCenter user={user} setPage={setPage} />
+          <div className="flex items-center gap-1.5 sm:gap-2 lg:hidden">
+            <ThemeToggle theme={theme} onToggle={onToggleTheme} />
+            <div className="hidden text-right sm:block">
+              <div className="text-[11px] font-semibold text-[#263d32]">{user.name}</div>
+              <div className="text-[9px] capitalize text-[#899087]">{role}</div>
+            </div>
+            <button
+              onClick={onSignOut}
+              className="hidden min-h-11 items-center gap-1.5 rounded-lg border border-[#d8ddd4] px-3 py-2 text-[10px] font-semibold text-[#486056] transition hover:border-[#184d37] hover:bg-white sm:flex"
+            >
+              <LogOut size={13} /> Sign out
             </button>
           </div>
+          <div ref={settingsRef} className="relative hidden items-center gap-3 lg:flex">
+            <button
+              type="button"
+              onClick={() => setSettingsOpen((open) => !open)}
+              className="settings-trigger grid size-11 place-items-center rounded-lg border border-[#d8ddd4] bg-white text-[#40564b] transition hover:border-[#92a397] hover:bg-[#edf1ec]"
+              aria-label="Open account settings"
+              aria-expanded={settingsOpen}
+              aria-haspopup="menu"
+            >
+              <Settings size={17} />
+            </button>
+            {settingsOpen && (
+              <div
+                role="menu"
+                className="settings-popover absolute right-0 top-[calc(100%+10px)] z-50 w-56 overflow-hidden rounded-xl border border-[#d8ded6] bg-white p-2 shadow-[0_18px_55px_rgba(19,43,31,.18)]"
+              >
+                <div className="border-b border-[#e5e8e2] px-3 py-2.5">
+                  <div className="truncate text-xs font-semibold text-[#29473a]">{user.name}</div>
+                  <div className="mt-0.5 text-[10px] capitalize text-[#6f7c74]">{role} account</div>
+                </div>
+                <button
+                  role="menuitem"
+                  onClick={() => {
+                    onToggleTheme();
+                    setSettingsOpen(false);
+                  }}
+                  className="settings-menu-item mt-1 flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-xs font-semibold text-[#40564b]"
+                >
+                  {theme === "light" ? <Moon size={16} /> : <Sun size={16} />}
+                  Use {theme === "light" ? "dark" : "light"} mode
+                </button>
+                <button
+                  role="menuitem"
+                  onClick={() => {
+                    setSettingsOpen(false);
+                    onSignOut();
+                  }}
+                  className="settings-signout flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-xs font-semibold"
+                >
+                  <LogOut size={16} /> Sign out
+                </button>
+              </div>
+            )}
+            <div className="text-right">
+              <div className="text-xs font-semibold text-[#263d32]">{user.name}</div>
+              <div className="mt-0.5 text-[10px] capitalize text-[#718078]">{role}</div>
+            </div>
+          </div>
+          <button
+            onClick={() => setMobileOpen(!mobileOpen)}
+            className="grid size-11 place-items-center rounded-lg border border-[#d8ddd4] text-[#375446] lg:hidden"
+            aria-label="Open navigation"
+            aria-expanded={mobileOpen}
+          >
+            <Menu size={17} />
+          </button>
         </div>
-      )}
+      </div>
+      {mobileOpen &&
+        createPortal(
+          <div
+            className="mobile-menu-backdrop fixed inset-0 z-[100] flex items-center justify-center overflow-hidden bg-[#07110c]/55 p-4 backdrop-blur-sm lg:hidden"
+            onMouseDown={() => setMobileOpen(false)}
+          >
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-label="Navigation menu"
+              className="mobile-menu-dialog max-h-[calc(100dvh-2rem)] w-full max-w-sm overflow-y-auto rounded-2xl border border-white/20 bg-white p-4 shadow-[0_24px_80px_rgba(0,0,0,.28)]"
+              onMouseDown={(event) => event.stopPropagation()}
+            >
+              <div className="mb-4 flex items-center justify-between px-1">
+                <div>
+                  <h2 className="text-base font-semibold text-[#1f4032]">Menu</h2>
+                  <p className="mt-0.5 text-[10px] capitalize text-[#66756d]">{role} navigation</p>
+                </div>
+                <button
+                  onClick={() => setMobileOpen(false)}
+                  className="grid size-11 place-items-center rounded-xl text-[#65766c] hover:bg-[#eef1eb]"
+                  aria-label="Close menu"
+                >
+                  <X size={19} />
+                </button>
+              </div>
+              <nav className="space-y-1.5">
+                {navByRole[role].map((item) => {
+                  const Icon = navIcons[item] ?? ArrowRight;
+                  return (
+                    <button
+                      key={item}
+                      onClick={() => {
+                        setPage(item);
+                        setMobileOpen(false);
+                      }}
+                      className={`flex min-h-12 w-full items-center gap-3 rounded-xl px-3.5 py-3 text-left text-sm font-semibold transition ${page === item ? "bg-[#e8efe8] text-[#184d37]" : "text-[#4d6056] hover:bg-[#f0f2ed]"}`}
+                    >
+                      <span className="grid size-8 place-items-center rounded-lg bg-white shadow-sm">
+                        <Icon size={16} />
+                      </span>
+                      {item}
+                    </button>
+                  );
+                })}
+              </nav>
+              <button
+                onClick={() => {
+                  setMobileOpen(false);
+                  onSignOut();
+                }}
+                className="mt-4 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-[#d8ddd4] px-3 py-3 text-xs font-semibold text-[#6b4a42]"
+              >
+                <LogOut size={15} /> Sign out
+              </button>
+            </div>
+          </div>,
+          document.body,
+        )}
     </header>
   );
 }
@@ -416,7 +773,7 @@ function Sidebar({
 }) {
   if (role === "student") return null;
   return (
-    <aside className="site-sidebar hidden w-[230px] shrink-0 border-r border-[#dfe1d8] bg-[#f8f9f3] p-4 lg:flex lg:flex-col">
+    <aside className="site-sidebar hidden w-[230px] shrink-0 border-r border-[#dfe1d8] bg-[#f8f9f3] p-4 lg:flex lg:h-full lg:flex-col lg:overflow-y-auto">
       <div className="space-y-1">
         {navByRole[role].map((item) => {
           const Icon = navIcons[item] ?? ArrowRight;
@@ -424,7 +781,7 @@ function Sidebar({
             <button
               key={item}
               onClick={() => setPage(item)}
-              className={`flex w-full items-center gap-3 rounded-lg px-3 py-3 text-left text-xs font-semibold transition-all duration-300 ${page === item ? "bg-[#184d37] text-white shadow-[0_8px_18px_rgba(24,77,55,.16)]" : "text-[#57675e] hover:translate-x-0.5 hover:bg-[#e8ece4]"}`}
+              className={`flex min-h-11 w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-xs font-semibold transition-colors duration-200 ${page === item ? "bg-[#184d37] text-white shadow-[0_8px_18px_rgba(24,77,55,.16)]" : "text-[#57675e] hover:bg-[#e8ece4]"}`}
             >
               <Icon size={16} strokeWidth={1.8} /> {item}
             </button>
@@ -508,10 +865,12 @@ function ProductCard({
         </button>
         <div className="mt-1 text-xs font-bold text-[#184d37]">{peso(product.price)}</div>
         <div className="mt-4 flex items-center justify-between gap-2">
-          <span className="text-[10px] text-[#899188]">
-            {product.stock > 50 ? "In stock" : `${product.stock} available`}
-          </span>
-          <Button onClick={() => add(product)} className="flex items-center gap-1.5 px-3 py-2">
+          <AvailabilityBadge stock={product.stock} />
+          <Button
+            disabled={product.stock <= 0}
+            onClick={() => add(product)}
+            className="gap-1.5 px-3 py-2"
+          >
             <ShoppingCart size={13} /> Add
           </Button>
         </div>
@@ -585,13 +944,13 @@ function StudentHome({
             </div>
             <div className="mt-10 flex flex-wrap gap-x-7 gap-y-3 text-[10px] font-medium text-[#647269]">
               <span className="flex items-center gap-1.5">
-                <CheckCircle2 size={14} className="text-[#3c765b]" /> Campus pickup
+                <CheckCircle2 size={14} className="icon-success" /> Campus pickup
               </span>
               <span className="flex items-center gap-1.5">
-                <Clock3 size={14} className="text-[#3c765b]" /> Live order updates
+                <Clock3 size={14} className="icon-info" /> Live order updates
               </span>
               <span className="flex items-center gap-1.5">
-                <ShieldCheck size={14} className="text-[#3c765b]" /> Secure student access
+                <ShieldCheck size={14} className="icon-success" /> Secure student access
               </span>
             </div>
           </div>
@@ -631,9 +990,12 @@ function StudentHome({
           }
         />
         <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
-          {products.slice(0, 4).map((p) => (
-            <ProductCard key={p.id} product={p} add={add} open={open} />
-          ))}
+          {products
+            .filter(isPhysicalProduct)
+            .slice(0, 4)
+            .map((p) => (
+              <ProductCard key={p.id} product={p} add={add} open={open} />
+            ))}
         </div>
       </section>
 
@@ -688,11 +1050,10 @@ function ProductsPage({
 }) {
   const { products } = useProductStore();
   const [query, setQuery] = useState("");
-  const [category, setCategory] = useState(serviceOnly ? "Services" : "All");
-  const categories = serviceOnly
-    ? ["Services"]
-    : ["All", "Notebooks", "Writing", "Bundles", "Services"];
-  const shown = products.filter(
+  const [category, setCategory] = useState("All");
+  const sectionProducts = products.filter(serviceOnly ? isServiceProduct : isPhysicalProduct);
+  const categories = ["All", ...new Set(sectionProducts.map((product) => product.category))];
+  const shown = sectionProducts.filter(
     (p) =>
       (category === "All" || p.category === category) &&
       p.name.toLowerCase().includes(query.toLowerCase()),
@@ -700,11 +1061,11 @@ function ProductsPage({
   return (
     <>
       <SectionTitle
-        title={serviceOnly ? "Services" : "Products and services"}
+        title={serviceOnly ? "Services" : "Products"}
         subtitle={
           serviceOnly
             ? "Convenient print and document services for students."
-            : "Browse school supplies and on-campus services."
+            : "Browse school supplies available for campus pickup."
         }
       />
       <div className="mb-6">
@@ -716,7 +1077,7 @@ function ProductsPage({
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search products"
+            placeholder={serviceOnly ? "Search services" : "Search products"}
             className="w-full rounded-lg border border-[#d9dfd5] bg-white py-2.5 pl-9 pr-3 text-xs outline-none focus:border-[#184d37]"
           />
         </label>
@@ -739,7 +1100,7 @@ function ProductsPage({
       </div>
       {!shown.length && (
         <div className="rounded-lg border border-dashed border-[#cfd6cc] py-16 text-center text-sm text-[#7c857d]">
-          No products match your search.
+          No {serviceOnly ? "services" : "products"} match your search.
         </div>
       )}
     </>
@@ -1199,13 +1560,9 @@ function Dashboard({ role, setPage }: { role: Role; setPage: (p: string) => void
                 <img src={p.image} alt="" className="size-9 rounded object-cover" />
                 <div className="flex-1">
                   <div className="text-xs font-semibold text-[#334e40]">{p.name}</div>
-                  <div className="text-[10px] text-[#8a928a]">
-                    {role === "staff"
-                      ? `${p.stock} available`
-                      : `${Math.min(p.stock, 8)} units left`}
-                  </div>
+                  <div className="mt-1 text-[10px] text-[#727e76]">{peso(p.price)}</div>
                 </div>
-                <Pill tone={p.stock < 20 ? "amber" : "green"}>{p.stock < 20 ? "Low" : "Good"}</Pill>
+                <AvailabilityBadge stock={role === "staff" ? p.stock : Math.min(p.stock, 8)} />
               </div>
             ))}
           </div>
@@ -1232,9 +1589,238 @@ function Dashboard({ role, setPage }: { role: Role; setPage: (p: string) => void
   );
 }
 
+function ProductSelectionModal({
+  products,
+  currentSale,
+  onAdd,
+  onClose,
+}: {
+  products: Product[];
+  currentSale: Record<number, number>;
+  onAdd: (selection: Record<number, number>) => void;
+  onClose: () => void;
+}) {
+  const [selection, setSelection] = useState<Record<number, number>>({});
+  const [query, setQuery] = useState("");
+  const [category, setCategory] = useState("All");
+  const [availability, setAvailability] = useState("All");
+  const categories = ["All", ...new Set(products.map((product) => product.category))];
+  const shown = products.filter((product) => {
+    const matchesQuery = product.name.toLowerCase().includes(query.trim().toLowerCase());
+    const matchesCategory = category === "All" || product.category === category;
+    const remaining = product.stock - (currentSale[product.id] || 0);
+    const matchesAvailability =
+      availability === "All" ||
+      (availability === "Available" && remaining > 0) ||
+      (availability === "Low stock" && remaining > 0 && remaining < 20) ||
+      (availability === "Unavailable" && remaining <= 0);
+    return matchesQuery && matchesCategory && matchesAvailability;
+  });
+  const selectedUnits = Object.values(selection).reduce((sum, quantity) => sum + quantity, 0);
+
+  useEffect(() => {
+    const previous = document.body.style.overflow;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.body.style.overflow = previous;
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [onClose]);
+
+  const adjust = (product: Product, delta: number) => {
+    const maximum = Math.max(0, product.stock - (currentSale[product.id] || 0));
+    setSelection((current) => {
+      const quantity = Math.max(0, Math.min(maximum, (current[product.id] || 0) + delta));
+      return { ...current, [product.id]: quantity };
+    });
+  };
+
+  return createPortal(
+    <div
+      className="pos-modal-backdrop fixed inset-0 z-[110] flex items-center justify-center bg-[#07110c]/65 p-3 backdrop-blur-sm sm:p-5"
+      onMouseDown={onClose}
+    >
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="add-products-title"
+        className="pos-product-modal grid h-[min(94dvh,900px)] w-full max-w-6xl grid-rows-[auto_auto_1fr_auto] overflow-hidden rounded-2xl border border-white/20 bg-[#f8f9f5] shadow-[0_30px_100px_rgba(0,0,0,.36)]"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header className="border-b border-[#dfe3dc] bg-white px-4 py-4 sm:px-6">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h2 id="add-products-title" className="text-xl font-semibold text-[#173d2f]">
+                Add products
+              </h2>
+              <p className="mt-1 text-xs text-[#6f7b74]">
+                Search inventory, choose quantities, then add everything in one step.
+              </p>
+            </div>
+            <span className="rounded-full bg-[#e2ecdf] px-3 py-1.5 text-[10px] font-bold text-[#174733]">
+              {selectedUnits} selected
+            </span>
+          </div>
+        </header>
+
+        <div className="border-b border-[#dfe3dc] bg-white px-4 py-4 sm:px-6">
+          <div className="grid gap-3 md:grid-cols-[minmax(220px,1fr)_190px_auto]">
+            <label className="relative">
+              <span className="sr-only">Search products</span>
+              <Search
+                size={16}
+                className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#78867e]"
+              />
+              <input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Search by product name"
+                className="min-h-11 w-full rounded-lg border border-[#ccd4cb] bg-white pl-10 pr-3 text-xs"
+              />
+            </label>
+            <label>
+              <span className="sr-only">Filter by availability</span>
+              <select
+                value={availability}
+                onChange={(event) => setAvailability(event.target.value)}
+                className="min-h-11 w-full rounded-lg border border-[#ccd4cb] bg-white px-3 text-xs font-semibold text-[#42564b]"
+              >
+                <option>All</option>
+                <option>Available</option>
+                <option>Low stock</option>
+                <option>Unavailable</option>
+              </select>
+            </label>
+            <Button
+              kind="secondary"
+              className="gap-2"
+              onClick={() => {
+                setQuery("");
+                setCategory("All");
+                setAvailability("All");
+              }}
+            >
+              <RotateCcw size={14} /> Reset filters
+            </Button>
+          </div>
+          <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
+            {categories.map((item) => (
+              <button
+                key={item}
+                onClick={() => setCategory(item)}
+                className={`min-h-10 shrink-0 rounded-full border px-3.5 text-[10px] font-bold transition ${
+                  category === item
+                    ? "border-[#184d37] bg-[#184d37] text-white"
+                    : "border-[#ccd4cb] bg-white text-[#4c6055] hover:border-[#7f9588]"
+                }`}
+              >
+                {item}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="overflow-y-auto p-4 sm:p-6">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {shown.map((product) => {
+              const remaining = Math.max(0, product.stock - (currentSale[product.id] || 0));
+              const quantity = selection[product.id] || 0;
+              return (
+                <article
+                  key={product.id}
+                  className={`rounded-xl border bg-white p-3 transition ${
+                    quantity
+                      ? "border-[#59816b] shadow-[0_0_0_2px_rgba(24,77,55,.1)]"
+                      : "border-[#dce2da]"
+                  }`}
+                >
+                  <div className="flex gap-3">
+                    <img
+                      src={product.image}
+                      alt=""
+                      className="size-16 shrink-0 rounded-lg object-cover"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-xs font-semibold text-[#203f32]">
+                        {product.name}
+                      </div>
+                      <div className="mt-1 text-[10px] text-[#6e7b73]">{product.category}</div>
+                      <div className="mt-1 text-sm font-bold text-[#184d37]">
+                        {peso(product.price)}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-3 flex items-center justify-between gap-3">
+                    <AvailabilityBadge stock={remaining} />
+                    <div className="flex min-h-11 items-center overflow-hidden rounded-lg border border-[#cbd3ca] bg-[#f8faf7]">
+                      <button
+                        onClick={() => adjust(product, -1)}
+                        disabled={!quantity}
+                        className="grid size-11 place-items-center text-[#496155] transition hover:bg-[#e8eee8] disabled:opacity-35"
+                        aria-label={`Decrease ${product.name} quantity`}
+                      >
+                        <Minus size={15} />
+                      </button>
+                      <span
+                        className="w-8 text-center text-xs font-bold text-[#263f33]"
+                        aria-live="polite"
+                      >
+                        {quantity}
+                      </span>
+                      <button
+                        onClick={() => adjust(product, 1)}
+                        disabled={quantity >= remaining}
+                        className="grid size-11 place-items-center text-[#184d37] transition hover:bg-[#e8eee8] disabled:opacity-35"
+                        aria-label={`Increase ${product.name} quantity`}
+                      >
+                        <Plus size={15} />
+                      </button>
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+          {!shown.length && (
+            <div className="grid min-h-52 place-items-center rounded-xl border border-dashed border-[#cbd3ca] text-center">
+              <div>
+                <Package size={24} className="mx-auto text-[#8b968f]" />
+                <p className="mt-3 text-xs font-semibold text-[#53635a]">
+                  No inventory matches these filters.
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <footer className="border-t border-[#dfe3dc] bg-white px-4 py-4 sm:px-6">
+          <div className="ml-auto flex w-full flex-col gap-2 sm:max-w-lg sm:flex-row-reverse">
+            <Button
+              disabled={!selectedUnits}
+              onClick={() => onAdd(selection)}
+              className="w-full sm:flex-1"
+            >
+              Add to transaction · {selectedUnits} {selectedUnits === 1 ? "item" : "items"}
+            </Button>
+            <Button kind="secondary" onClick={onClose} className="w-full gap-2 sm:flex-1">
+              <X size={15} /> Close
+            </Button>
+          </div>
+        </footer>
+      </section>
+    </div>,
+    document.body,
+  );
+}
+
 function PosTerminal() {
   const { products, refreshProducts } = useProductStore();
   const [sale, setSale] = useState<Record<number, number>>({});
+  const [catalogOpen, setCatalogOpen] = useState(false);
   const [result, setResult] = useState<{
     transaction: { id: string; total: number };
     impactedOrders: OnlineOrder[];
@@ -1242,6 +1828,29 @@ function PosTerminal() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const total = products.reduce((s, p) => s + (sale[p.id] || 0) * p.price, 0);
+  const saleLines = products.filter((product) => sale[product.id] > 0);
+  const itemCount = saleLines.reduce((sum, product) => sum + sale[product.id], 0);
+  const changeQuantity = (product: Product, delta: number) => {
+    setSale((current) => {
+      const quantity = Math.max(0, Math.min(product.stock, (current[product.id] || 0) + delta));
+      return { ...current, [product.id]: quantity };
+    });
+  };
+  const addSelection = (selection: Record<number, number>) => {
+    setSale((current) => {
+      const next = { ...current };
+      products.forEach((product) => {
+        if (selection[product.id]) {
+          next[product.id] = Math.min(
+            product.stock,
+            (current[product.id] || 0) + selection[product.id],
+          );
+        }
+      });
+      return next;
+    });
+    setCatalogOpen(false);
+  };
   const completeSale = async () => {
     setSaving(true);
     setError("");
@@ -1265,7 +1874,7 @@ function PosTerminal() {
     return (
       <div className="mx-auto max-w-xl rounded-lg border border-[#dce1d7] bg-white p-10 text-center">
         <span className="mx-auto grid size-12 place-items-center rounded-full bg-[#dce9de] text-[#174733]">
-          <CheckCircle2 size={22} />
+          <CheckCircle2 size={22} className="icon-success" />
         </span>
         <h1 className="mt-5 text-2xl font-semibold text-[#173d2f]">Transaction completed</h1>
         <p className="mt-2 text-xs text-[#78827a]">
@@ -1274,7 +1883,8 @@ function PosTerminal() {
         {result.impactedOrders.length > 0 && (
           <div className="mt-6 rounded-xl border border-[#e1d4a7] bg-[#faf5df] p-4 text-left">
             <div className="flex items-center gap-2 text-xs font-semibold text-[#67581c]">
-              <AlertTriangle size={16} /> {result.impactedOrders.length} online order
+              <AlertTriangle size={16} className="icon-warning" /> {result.impactedOrders.length}{" "}
+              online order
               {result.impactedOrders.length > 1 ? "s need" : " needs"} attention
             </div>
             <p className="mt-2 text-[10px] leading-5 text-[#7a6d39]">
@@ -1296,46 +1906,131 @@ function PosTerminal() {
     );
   return (
     <>
-      <SectionTitle title="POS terminal" subtitle="Create a quick walk-in transaction." />
-      <div className="grid gap-5 xl:grid-cols-[1fr_370px]">
-        <div className="order-2 xl:order-1">
-          <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
-            {products.map((p) => (
-              <button
-                key={p.id}
-                onClick={() => setSale((c) => ({ ...c, [p.id]: (c[p.id] || 0) + 1 }))}
-                className="min-h-11 rounded-xl border border-[#dce1d7] bg-white p-3 text-left transition hover:-translate-y-0.5 hover:border-[#184d37]"
-              >
-                <img src={p.image} alt="" className="h-24 w-full rounded-md object-cover" />
-                <div className="mt-3 text-xs font-semibold text-[#224837]">{p.name}</div>
-                <div className="mt-1 text-[11px] font-bold text-[#184d37]">{peso(p.price)}</div>
-                <div className="mt-3 text-center text-[10px] font-semibold text-[#547063]">
-                  Add item
-                </div>
-              </button>
-            ))}
+      <SectionTitle
+        title="POS terminal"
+        subtitle="Build and complete a walk-in transaction from one workspace."
+      />
+      <div className="grid min-h-[calc(100dvh-250px)] gap-5 lg:grid-cols-[minmax(0,1.45fr)_minmax(300px,.55fr)]">
+        <section className="flex min-h-[480px] flex-col overflow-hidden rounded-2xl border border-[#d8ded6] bg-white shadow-[0_12px_36px_rgba(27,58,43,.06)]">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#e2e6df] p-4 sm:p-5">
+            <div>
+              <h2 className="text-base font-semibold text-[#193f31]">Current transaction</h2>
+              <p className="mt-1 text-[10px] text-[#748078]">
+                {itemCount
+                  ? `${itemCount} ${itemCount === 1 ? "item" : "items"} selected`
+                  : "No items added yet"}
+              </p>
+            </div>
+            <Button onClick={() => setCatalogOpen(true)} className="w-full gap-2 sm:w-auto">
+              <Plus size={16} /> Add products
+            </Button>
           </div>
-        </div>
-        <aside className="order-1 h-fit rounded-xl border border-[#dce1d7] bg-white p-5 xl:order-2 xl:sticky xl:top-24">
-          <h2 className="text-sm font-semibold">Current transaction</h2>
-          <div className="mt-4 min-h-32 space-y-3">
-            {products
-              .filter((p) => sale[p.id])
-              .map((p) => (
-                <div key={p.id} className="flex justify-between text-xs">
-                  <span>
-                    {sale[p.id]}× {p.name}
-                  </span>
-                  <span>{peso(p.price * sale[p.id])}</span>
+
+          <div className="flex-1 overflow-y-auto">
+            {saleLines.length ? (
+              saleLines.map((product, index) => (
+                <div
+                  key={product.id}
+                  className={`grid gap-4 p-4 sm:grid-cols-[auto_minmax(0,1fr)_auto_auto] sm:items-center sm:p-5 ${
+                    index ? "border-t border-[#e7eae5]" : ""
+                  }`}
+                >
+                  <img
+                    src={product.image}
+                    alt=""
+                    className="size-14 rounded-lg object-cover sm:size-16"
+                  />
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-semibold text-[#234437]">
+                      {product.name}
+                    </div>
+                    <div className="mt-1 flex flex-wrap items-center gap-2">
+                      <span className="text-xs font-bold text-[#184d37]">
+                        {peso(product.price)} each
+                      </span>
+                      <AvailabilityBadge stock={product.stock - sale[product.id]} />
+                    </div>
+                  </div>
+                  <div className="flex min-h-11 w-fit items-center overflow-hidden rounded-lg border border-[#ccd4cb]">
+                    <button
+                      onClick={() => changeQuantity(product, -1)}
+                      className="grid size-11 place-items-center text-[#4d6256] hover:bg-[#edf2ed]"
+                      aria-label={`Decrease ${product.name} quantity`}
+                    >
+                      <Minus size={15} />
+                    </button>
+                    <span className="w-9 text-center text-xs font-bold">{sale[product.id]}</span>
+                    <button
+                      onClick={() => changeQuantity(product, 1)}
+                      disabled={sale[product.id] >= product.stock}
+                      className="grid size-11 place-items-center text-[#184d37] hover:bg-[#edf2ed] disabled:opacity-35"
+                      aria-label={`Increase ${product.name} quantity`}
+                    >
+                      <Plus size={15} />
+                    </button>
+                  </div>
+                  <div className="flex items-center justify-between gap-3 sm:block sm:text-right">
+                    <div className="text-sm font-bold text-[#203f32]">
+                      {peso(product.price * sale[product.id])}
+                    </div>
+                    <button
+                      onClick={() => setSale((current) => ({ ...current, [product.id]: 0 }))}
+                      className="danger-button mt-1 inline-flex min-h-10 items-center gap-1.5 rounded-lg px-2 text-[10px] font-bold"
+                    >
+                      <Trash2 size={13} /> Remove
+                    </button>
+                  </div>
                 </div>
-              ))}
-            {!total && (
-              <p className="pt-8 text-center text-xs text-[#919991]">Select a product to begin.</p>
+              ))
+            ) : (
+              <div className="grid min-h-[350px] place-items-center p-8 text-center">
+                <div className="max-w-xs">
+                  <span className="mx-auto grid size-14 place-items-center rounded-2xl bg-[#e8eee7] text-[#315f49]">
+                    <ShoppingCart size={23} />
+                  </span>
+                  <h3 className="mt-4 text-sm font-semibold text-[#29483a]">
+                    Start this transaction
+                  </h3>
+                  <p className="mt-2 text-xs leading-5 text-[#78837c]">
+                    Use Add products above to search inventory and select multiple items.
+                  </p>
+                </div>
+              </div>
             )}
           </div>
-          <div className="flex justify-between border-t pt-4 text-base font-bold text-[#173d2f]">
-            <span>Total</span>
-            <span>{peso(total)}</span>
+        </section>
+
+        <aside className="h-fit rounded-2xl border border-[#d8ded6] bg-white p-5 shadow-[0_12px_36px_rgba(27,58,43,.06)] lg:sticky lg:top-24">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-[#193f31]">Transaction summary</h2>
+            <Pill tone={itemCount ? "green" : "gray"}>{itemCount ? "In progress" : "Empty"}</Pill>
+          </div>
+          <div className="mt-5 space-y-3 text-xs text-[#66736b]">
+            <div className="flex justify-between">
+              <span>Selected items</span>
+              <span className="font-semibold text-[#304b3d]">{itemCount}</span>
+            </div>
+            <div className="flex justify-between">
+              <span>Subtotal</span>
+              <span className="font-semibold text-[#304b3d]">{peso(total)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span>Additional charges</span>
+              <span className="font-semibold text-[#304b3d]">₱0.00</span>
+            </div>
+            <div className="flex justify-between border-t border-[#dfe4dd] pt-4 text-base font-bold text-[#173d2f]">
+              <span>Total</span>
+              <span>{peso(total)}</span>
+            </div>
+          </div>
+          <div className="mt-5 rounded-xl border border-[#dce3da] bg-[#f5f8f3] p-4">
+            <div className="flex gap-3">
+              <ShieldCheck size={17} className="icon-info mt-0.5 shrink-0" />
+              <p className="text-[10px] leading-5 text-[#637169]">
+                Inventory is validated again when the sale is completed. Online order conflicts are
+                flagged automatically.
+              </p>
+            </div>
           </div>
           {error && (
             <div className="mt-4 rounded-lg border border-[#dfc6bd] bg-[#fbefeb] p-3 text-xs text-[#8b4333]">
@@ -1345,8 +2040,23 @@ function PosTerminal() {
           <Button disabled={!total || saving} className="mt-5 w-full" onClick={completeSale}>
             {saving ? "Processing…" : "Complete walk-in sale"}
           </Button>
+          <button
+            onClick={() => setSale({})}
+            disabled={!itemCount || saving}
+            className="danger-button mt-2 min-h-11 w-full rounded-lg border px-4 text-xs font-bold disabled:cursor-not-allowed disabled:opacity-45"
+          >
+            Clear transaction
+          </button>
         </aside>
       </div>
+      {catalogOpen && (
+        <ProductSelectionModal
+          products={products}
+          currentSale={sale}
+          onAdd={addSelection}
+          onClose={() => setCatalogOpen(false)}
+        />
+      )}
     </>
   );
 }
@@ -1406,7 +2116,7 @@ function OrderManagementPage() {
         <div className="mb-5 rounded-xl border border-[#ded09c] bg-[#faf5df] p-4 sm:flex sm:items-center sm:justify-between">
           <div className="flex items-start gap-3">
             <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-[#eadfae] text-[#66591e]">
-              <AlertTriangle size={17} />
+              <AlertTriangle size={17} className="icon-warning" />
             </span>
             <div>
               <div className="text-xs font-semibold text-[#5f531e]">
@@ -1467,9 +2177,9 @@ function OrderManagementPage() {
                     </Button>
                     <button
                       onClick={() => changeStatus(order, "Cancelled")}
-                      className="flex items-center gap-1.5 rounded-md px-3 py-2 text-[10px] font-semibold text-[#8a493e] hover:bg-[#fbefeb]"
+                      className="danger-button flex min-h-11 items-center gap-1.5 rounded-lg px-3 text-[10px] font-semibold"
                     >
-                      <XCircle size={13} /> Cancel
+                      <XCircle size={13} className="icon-danger" /> Cancel
                     </button>
                   </>
                 )}
@@ -1637,7 +2347,7 @@ function UserManagementPage({ currentUserId }: { currentUserId: string }) {
               {user.id !== currentUserId ? (
                 <button
                   onClick={() => toggleAccess(user)}
-                  className={`min-h-11 rounded-lg px-3 text-xs font-semibold ${user.active ? "border border-[#dfc6bd] text-[#8a493e]" : "border border-[#bfd1c0] text-[#315b48]"}`}
+                  className={`min-h-11 rounded-lg px-3 text-xs font-semibold ${user.active ? "danger-button border" : "border border-[#bfd1c0] text-[#315b48]"}`}
                 >
                   {user.active ? "Remove access" : "Restore access"}
                 </button>
@@ -1689,7 +2399,7 @@ function UserManagementPage({ currentUserId }: { currentUserId: string }) {
                       {user.id !== currentUserId && (
                         <button
                           onClick={() => toggleAccess(user)}
-                          className={`flex items-center gap-1.5 rounded-md px-2.5 py-2 text-[10px] font-semibold ${user.active ? "text-[#8a493e] hover:bg-[#fbefeb]" : "text-[#315b48] hover:bg-[#edf2eb]"}`}
+                          className={`flex min-h-10 items-center gap-1.5 rounded-lg px-2.5 text-[10px] font-semibold ${user.active ? "danger-button" : "text-[#315b48] hover:bg-[#edf2eb]"}`}
                         >
                           <UserX size={13} /> {user.active ? "Remove" : "Restore"}
                         </button>
@@ -1719,7 +2429,7 @@ function UserManagementPage({ currentUserId }: { currentUserId: string }) {
           <form
             onSubmit={saveUser}
             onMouseDown={(event) => event.stopPropagation()}
-            className="w-full max-w-xl rounded-2xl border border-white/20 bg-white p-6 shadow-2xl"
+            className="max-h-[calc(100dvh-2rem)] w-full max-w-xl overflow-y-auto rounded-2xl border border-white/20 bg-white p-6 shadow-2xl"
           >
             <div className="flex items-start justify-between gap-4">
               <div>
@@ -1730,8 +2440,13 @@ function UserManagementPage({ currentUserId }: { currentUserId: string }) {
                   Credentials are stored in Supabase Auth; profile access is stored separately.
                 </p>
               </div>
-              <button type="button" onClick={() => setEditing(null)} className="text-xs">
-                Close
+              <button
+                type="button"
+                onClick={() => setEditing(null)}
+                className="grid size-11 shrink-0 place-items-center rounded-lg border border-[#d5dcd4] text-[#53645a] transition hover:bg-[#edf1ec]"
+                aria-label="Close account form"
+              >
+                <X size={17} />
               </button>
             </div>
             <div className="mt-6 grid gap-4 sm:grid-cols-2">
@@ -1784,12 +2499,16 @@ function UserManagementPage({ currentUserId }: { currentUserId: string }) {
                 />
               </label>
             </div>
-            <div className="mt-6 flex justify-end gap-2">
-              <Button kind="secondary" onClick={() => setEditing(null)}>
-                Cancel
-              </Button>
-              <Button type="submit" disabled={saving} className="flex items-center gap-2">
+            <div className="mt-6 grid gap-2 sm:flex sm:flex-row-reverse sm:justify-start">
+              <Button type="submit" disabled={saving} className="w-full gap-2 sm:w-auto">
                 <Save size={14} /> {saving ? "Saving…" : "Save account"}
+              </Button>
+              <Button
+                kind="secondary"
+                onClick={() => setEditing(null)}
+                className="w-full sm:w-auto"
+              >
+                Cancel
               </Button>
             </div>
           </form>
@@ -1897,7 +2616,7 @@ function ManagementPage({ page }: { page: string }) {
           <form
             onSubmit={saveProduct}
             onMouseDown={(event) => event.stopPropagation()}
-            className="w-full max-w-xl rounded-xl bg-white p-6 shadow-2xl"
+            className="max-h-[calc(100dvh-2rem)] w-full max-w-xl overflow-y-auto rounded-xl bg-white p-6 shadow-2xl"
           >
             <div className="flex items-center justify-between">
               <div>
@@ -1908,8 +2627,13 @@ function ManagementPage({ page }: { page: string }) {
                   Changes are stored in your connected Supabase database.
                 </p>
               </div>
-              <button type="button" onClick={() => setEditing(null)} className="text-xs">
-                Close
+              <button
+                type="button"
+                onClick={() => setEditing(null)}
+                className="grid size-11 shrink-0 place-items-center rounded-lg border border-[#d5dcd4] text-[#53645a] transition hover:bg-[#edf1ec]"
+                aria-label="Close product form"
+              >
+                <X size={17} />
               </button>
             </div>
             <div className="mt-5 grid gap-4 sm:grid-cols-2">
@@ -1975,12 +2699,16 @@ function ManagementPage({ page }: { page: string }) {
                 />
               </label>
             </div>
-            <div className="mt-6 flex justify-end gap-2">
-              <Button kind="secondary" onClick={() => setEditing(null)}>
-                Cancel
-              </Button>
-              <Button type="submit" disabled={saving}>
+            <div className="mt-6 grid gap-2 sm:flex sm:flex-row-reverse sm:justify-start">
+              <Button type="submit" disabled={saving} className="w-full sm:w-auto">
                 {saving ? "Saving…" : "Save product"}
+              </Button>
+              <Button
+                kind="secondary"
+                onClick={() => setEditing(null)}
+                className="w-full sm:w-auto"
+              >
+                Cancel
               </Button>
             </div>
           </form>
@@ -2092,7 +2820,7 @@ function ManagementPage({ page }: { page: string }) {
                               );
                             }
                           }}
-                          className="min-h-11 rounded-lg px-3 font-semibold text-[#8a493e] hover:bg-[#fbefeb]"
+                          className="danger-button min-h-11 rounded-lg px-3 font-semibold"
                         >
                           Delete
                         </button>
@@ -2187,6 +2915,7 @@ export default function App() {
   const [cart, setCart] = useState<Record<number, number>>({ 1: 1, 2: 1 });
   const [selected, setSelected] = useState<Product | null>(null);
   const [toast, setToast] = useState("");
+  const mainRef = useRef<HTMLElement>(null);
   const cartCount = useMemo(() => Object.values(cart).reduce((a, b) => a + b, 0), [cart]);
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -2196,11 +2925,25 @@ export default function App() {
     const themeColor = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
     if (themeColor) themeColor.content = theme === "dark" ? "#101112" : "#123d2c";
   }, [theme]);
+  useEffect(() => {
+    if (!selected) return;
+    const previous = document.body.style.overflow;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setSelected(null);
+    };
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.body.style.overflow = previous;
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [selected]);
   const toggleTheme = () => setTheme((current) => (current === "light" ? "dark" : "light"));
   const navigate = (nextPage: string) => {
     if (nextPage === page) return;
     setPageHistory((history) => [...history, page].slice(-20));
     setPage(nextPage);
+    mainRef.current?.scrollTo({ top: 0, behavior: "smooth" });
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
   const goBack = () => {
@@ -2210,6 +2953,7 @@ export default function App() {
       setPage(next.pop() ?? fallback);
       return next;
     });
+    mainRef.current?.scrollTo({ top: 0, behavior: "smooth" });
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
   const add = (p: Product) => {
@@ -2221,7 +2965,6 @@ export default function App() {
     return (
       <Login
         theme={theme}
-        onToggleTheme={toggleTheme}
         onAuthenticated={(nextUser) => {
           setUser(nextUser);
           setPage(nextUser.role === "student" ? "Home" : "Dashboard");
@@ -2358,9 +3101,20 @@ export default function App() {
           theme={theme}
           onToggleTheme={toggleTheme}
         />
-        <div className="mx-auto flex min-h-[calc(100vh-72px)] max-w-[1500px]">
+        <div
+          className={`mx-auto flex max-w-[1500px] ${
+            role === "student"
+              ? "min-h-[calc(100vh-72px)]"
+              : "min-h-[calc(100vh-72px)] lg:h-[calc(100dvh-72px)] lg:min-h-0 lg:overflow-hidden"
+          }`}
+        >
           <Sidebar role={role} page={page} setPage={navigate} />
-          <main className="min-w-0 flex-1 overflow-hidden p-4 sm:p-7 lg:p-9">
+          <main
+            ref={mainRef}
+            className={`min-w-0 flex-1 p-4 sm:p-7 lg:p-9 ${
+              role === "student" ? "overflow-hidden" : "lg:h-full lg:overflow-y-auto"
+            } ${role === "student" ? "" : "staff-main"}`}
+          >
             {page !== (role === "student" ? "Home" : "Dashboard") && (
               <BackButton onClick={goBack} />
             )}
@@ -2375,44 +3129,56 @@ export default function App() {
         )}
         {selected && (
           <div
-            className="fixed inset-0 z-50 grid place-items-center bg-[#10251d]/55 p-4"
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-[#10251d]/60 p-4 backdrop-blur-sm"
             onMouseDown={() => setSelected(null)}
           >
             <div
-              className="grid w-full max-w-3xl overflow-hidden rounded-xl bg-white shadow-2xl md:grid-cols-2"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="product-detail-title"
+              className="grid max-h-[calc(100dvh-2rem)] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white shadow-2xl md:grid-cols-2"
               onMouseDown={(e) => e.stopPropagation()}
             >
               <img
                 src={selected.image}
                 alt={selected.name}
-                className="h-full min-h-64 w-full object-cover"
+                className="h-48 w-full object-cover md:h-full md:min-h-64"
               />
               <div className="p-7">
-                <button
-                  onClick={() => setSelected(null)}
-                  className="float-right text-sm text-[#78827a]"
-                >
-                  Close
-                </button>
                 <div className="text-[10px] font-bold uppercase tracking-[.14em] text-[#829085]">
                   {selected.category}
                 </div>
-                <h2 className="mt-3 text-2xl font-semibold text-[#163d2f]">{selected.name}</h2>
+                <h2
+                  id="product-detail-title"
+                  className="mt-3 text-2xl font-semibold text-[#163d2f]"
+                >
+                  {selected.name}
+                </h2>
                 <div className="mt-2 text-lg font-bold text-[#184d37]">{peso(selected.price)}</div>
                 <p className="mt-5 text-sm leading-6 text-[#6e7971]">{selected.description}</p>
-                <div className="mt-5 rounded-md bg-[#f2f4ed] p-3 text-xs text-[#607068]">
-                  {selected.stock > 50 ? "In stock and ready" : `${selected.stock} available`} ·
-                  Campus pickup
+                <div className="mt-5 flex items-center justify-between gap-3 rounded-lg border border-[#dce2da] bg-[#f2f4ed] p-3">
+                  <AvailabilityBadge stock={selected.stock} />
+                  <span className="text-[10px] font-semibold text-[#607068]">Campus pickup</span>
                 </div>
-                <Button
-                  className="mt-6 w-full"
-                  onClick={() => {
-                    add(selected);
-                    setSelected(null);
-                  }}
-                >
-                  Add to cart
-                </Button>
+                <div className="mt-6 flex flex-col gap-2 sm:flex-row-reverse">
+                  <Button
+                    disabled={selected.stock <= 0}
+                    className="w-full sm:flex-1"
+                    onClick={() => {
+                      add(selected);
+                      setSelected(null);
+                    }}
+                  >
+                    Add to cart
+                  </Button>
+                  <Button
+                    kind="secondary"
+                    className="w-full gap-2 sm:flex-1"
+                    onClick={() => setSelected(null)}
+                  >
+                    <X size={15} /> Close
+                  </Button>
+                </div>
               </div>
             </div>
           </div>

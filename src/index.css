@@ -198,10 +198,83 @@ html[data-theme="dark"] body::before {
   background: #222527 !important;
 }
 
+[data-theme="dark"] .settings-trigger,
+[data-theme="dark"] .settings-popover {
+  border-color: #3b4042 !important;
+  color: #e1e5e2 !important;
+  background: #202325 !important;
+}
+
+[data-theme="dark"] .settings-popover {
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.52) !important;
+}
+
+[data-theme="dark"] .settings-menu-item {
+  color: #d9dfdb !important;
+}
+
+[data-theme="dark"] .settings-menu-item:hover,
+[data-theme="dark"] .settings-trigger:hover {
+  color: #f0f4f1 !important;
+  background: #2b302d !important;
+}
+
+[data-theme="dark"] .settings-signout {
+  color: #f0afa3 !important;
+}
+
+[data-theme="dark"] .settings-signout:hover {
+  color: #ffd0c7 !important;
+  background: #422723 !important;
+}
+
+[data-theme="dark"] .notification-trigger,
+[data-theme="dark"] .notification-panel,
+[data-theme="dark"] .urgent-notification-modal {
+  border-color: #3b4042 !important;
+  color: #e1e5e2 !important;
+  background: #202325 !important;
+}
+
+[data-theme="dark"] .notification-trigger:hover {
+  color: #f0f4f1 !important;
+  background: #2b302d !important;
+}
+
+[data-theme="dark"] .notification-item {
+  border-color: #353a3c !important;
+  background: #202325 !important;
+}
+
+[data-theme="dark"] .notification-item:hover {
+  background: #2b302d !important;
+}
+
+[data-theme="dark"] .notification-item[class*="bg-[#f0f6ef]"] {
+  background: #223129 !important;
+}
+
+[data-theme="dark"] .notification-count {
+  border-color: #202325 !important;
+  color: #fff !important;
+  background: #c45c4d !important;
+}
+
+[data-theme="dark"] .urgent-notification-modal {
+  border-color: #71642e !important;
+  box-shadow: 0 30px 100px rgba(0, 0, 0, 0.62) !important;
+}
+
 [data-theme="dark"] .mobile-menu-dialog {
   border-color: #3a3e40 !important;
   background: #202325 !important;
   box-shadow: 0 28px 90px rgba(0, 0, 0, 0.55);
+}
+
+[data-theme="dark"] .pos-product-modal {
+  border-color: #3a3e40 !important;
+  background: #181a1c !important;
+  box-shadow: 0 30px 100px rgba(0, 0, 0, 0.62);
 }
 
 [data-theme="dark"] .back-button {
@@ -247,17 +320,294 @@ html[data-theme="dark"] body::before {
   outline-color: #79b68f;
 }
 
+[data-theme="light"] [class*="text-[#7"],
+[data-theme="light"] [class*="text-[#8"],
+[data-theme="light"] [class*="text-[#9"] {
+  color: #5f6d65;
+}
+
+[data-theme="light"] [class*="text-[#8b4333]"],
+[data-theme="light"] [class*="text-[#8a493e]"] {
+  color: #854236 !important;
+}
+
+[data-theme="light"] [class*="text-[#7a6d39]"],
+[data-theme="light"] [class*="text-[#7a6e3b]"] {
+  color: #665a2b !important;
+}
+
+[data-theme="light"] input::placeholder,
+[data-theme="light"] textarea::placeholder {
+  color: #68766e;
+  opacity: 1;
+}
+
+.app-shell [class*="text-[9px]"],
+.login-shell [class*="text-[9px]"] {
+  font-size: 0.625rem;
+}
+
+.app-shell [class*="text-[10px]"],
+.login-shell [class*="text-[10px]"] {
+  font-size: 0.6875rem;
+}
+
+[data-theme="dark"] [class*="hover:bg-white"]:hover {
+  color: #eef2ef !important;
+  background: #2a2e30 !important;
+}
+
+[data-theme="dark"] [class*="hover:bg-[#e"]:hover,
+[data-theme="dark"] [class*="hover:bg-[#f"]:hover {
+  color: #eef2ef !important;
+  background: #2a302d !important;
+}
+
+[data-theme="dark"] [class*="hover:text-[#1"]:hover,
+[data-theme="dark"] [class*="hover:text-[#3"]:hover {
+  color: #a9d7b9 !important;
+}
+
+.icon-success {
+  color: #2f7651 !important;
+}
+
+.icon-warning {
+  color: #9a7312 !important;
+}
+
+.icon-danger {
+  color: #a64f42 !important;
+}
+
+.icon-info {
+  color: #3f7188 !important;
+}
+
+[data-theme="dark"] .icon-success {
+  color: #7bc394 !important;
+}
+
+[data-theme="dark"] .icon-warning {
+  color: #e5bd4f !important;
+}
+
+[data-theme="dark"] .icon-danger {
+  color: #ef8f80 !important;
+}
+
+[data-theme="dark"] .icon-info {
+  color: #83bdd5 !important;
+}
+
+.settings-popover {
+  transform-origin: top right;
+  animation: popover-in 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.notification-panel {
+  top: 5rem;
+  right: max(1rem, calc((100vw - 1500px) / 2 + 1.75rem));
+  transform-origin: top right;
+  animation: popover-in 200ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.urgent-notification-modal {
+  animation: menu-dialog-in 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.notification-item:hover {
+  background: #e8f0e8;
+}
+
+.settings-menu-item,
+.settings-signout {
+  transition:
+    color 180ms ease,
+    background-color 180ms ease;
+}
+
+.settings-menu-item:hover {
+  color: #173d2f;
+  background: #edf2ed;
+}
+
+.settings-signout {
+  color: #8b4135;
+}
+
+.settings-signout:hover {
+  color: #713229;
+  background: #f9e5e0;
+}
+
+.staff-main,
+.site-sidebar {
+  scrollbar-gutter: stable;
+}
+
+.app-shell button,
+.app-shell a,
+.login-shell button,
+.login-shell a {
+  transition-duration: 180ms;
+  transition-timing-function: ease;
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.65rem;
+  border: 1px solid;
+  border-radius: 999px;
+  padding: 0.2rem 0.55rem;
+  font-size: 0.6rem;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid;
+  border-radius: 999px;
+  padding: 0.3rem 0.65rem;
+  font-size: 0.6rem;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.status-pill-green {
+  border-color: #a9c7ae;
+  color: #16452f;
+  background: #dcebdd;
+}
+
+.status-pill-amber {
+  border-color: #d9c77b;
+  color: #5e5118;
+  background: #f5edc9;
+}
+
+.status-pill-gray {
+  border-color: #c9cfca;
+  color: #46524a;
+  background: #ecefeb;
+}
+
+.status-available {
+  border-color: #a6c6ad;
+  color: #174b31;
+  background: #e0efe2;
+}
+
+.status-low {
+  border-color: #d8c36c;
+  color: #5d4d10;
+  background: #f7efc8;
+}
+
+.status-unavailable {
+  border-color: #d6aca3;
+  color: #803e32;
+  background: #f8e3de;
+}
+
+[data-theme="dark"] .status-available {
+  border-color: #466d55;
+  color: #b5e2c2;
+  background: #1b3827;
+}
+
+[data-theme="dark"] .status-low {
+  border-color: #71642e;
+  color: #f0dc82;
+  background: #342f19;
+}
+
+[data-theme="dark"] .status-unavailable {
+  border-color: #774a42;
+  color: #f1b1a5;
+  background: #3a211d;
+}
+
+[data-theme="dark"] .status-pill-green {
+  border-color: #466d55;
+  color: #b5e2c2;
+  background: #1b3827;
+}
+
+[data-theme="dark"] .status-pill-amber {
+  border-color: #71642e;
+  color: #f0dc82;
+  background: #342f19;
+}
+
+[data-theme="dark"] .status-pill-gray {
+  border-color: #505658;
+  color: #cbd0cd;
+  background: #292c2e;
+}
+
+.danger-button {
+  border-color: #d9aea5;
+  color: #8b4135;
+  background: #fff9f7;
+  transition:
+    border-color 180ms ease,
+    color 180ms ease,
+    background-color 180ms ease;
+}
+
+.danger-button:hover {
+  border-color: #bd776b;
+  color: #713229;
+  background: #f9e5e0;
+}
+
+[data-theme="dark"] .danger-button {
+  border-color: #704a43 !important;
+  color: #f0afa3 !important;
+  background: #2e201e !important;
+}
+
+[data-theme="dark"] .danger-button:hover {
+  border-color: #9a6258 !important;
+  color: #ffd0c7 !important;
+  background: #422723 !important;
+}
+
 .mobile-menu-backdrop {
   animation: menu-backdrop-in 180ms ease-out both;
 }
 
-.mobile-menu-dialog {
+.mobile-menu-dialog,
+.pos-product-modal {
   animation: menu-dialog-in 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 @media (max-width: 640px) {
   :root {
     font-size: 16px;
+  }
+
+  .pos-modal-backdrop {
+    padding: 0.5rem;
+  }
+
+  .pos-product-modal {
+    height: calc(100dvh - 1rem);
+    border-radius: 1rem;
+  }
+
+  .notification-panel {
+    top: 4.75rem;
+    right: 0.75rem;
+    left: 0.75rem;
+    width: auto;
+    max-height: calc(100dvh - 5.5rem);
   }
 }
 
@@ -390,6 +740,18 @@ html[data-theme="dark"] body::before {
   from {
     opacity: 0;
     transform: translateY(12px) scale(0.97);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes popover-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.97);
   }
 
   to {

@@ -1,4 +1,5 @@
 import { apiRequest } from "./api";
+import { requestNotificationRefresh } from "./notifications";
 
 export type Product = {
   id: number;
@@ -9,6 +10,11 @@ export type Product = {
   image: string;
   description: string;
 };
+
+export const SERVICE_CATEGORY = "Services";
+export const isServiceProduct = (product: Product) =>
+  product.category.trim().toLowerCase() === SERVICE_CATEGORY.toLowerCase();
+export const isPhysicalProduct = (product: Product) => !isServiceProduct(product);
 
 export const fallbackProducts: Product[] = [
   {
@@ -72,25 +78,30 @@ export async function getProducts() {
 }
 
 export async function createProduct(product: Omit<Product, "id">) {
-  return (
+  const created = (
     await apiRequest<{ product: Product }>(
       "/products",
       { method: "POST", body: JSON.stringify(product) },
       true,
     )
   ).product;
+  requestNotificationRefresh();
+  return created;
 }
 
 export async function updateProduct(id: number, updates: Partial<Product>) {
-  return (
+  const updated = (
     await apiRequest<{ product: Product }>(
       `/products/${id}`,
       { method: "PUT", body: JSON.stringify(updates) },
       true,
     )
   ).product;
+  requestNotificationRefresh();
+  return updated;
 }
 
 export async function deleteProduct(id: number) {
   await apiRequest(`/products/${id}`, { method: "DELETE" }, true);
+  requestNotificationRefresh();
 }
