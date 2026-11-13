@@ -348,6 +348,7 @@ function NotificationCenter({
   const [error, setError] = useState("");
   const [urgent, setUrgent] = useState<AppNotification | null>(null);
   const [suppressUrgent, setSuppressUrgent] = useState(false);
+  const [swipedId, setSwipedId] = useState<string | null>(null);
   const urgentShownKey = `plmun-urgent-shown-${user.id}`;
   const dismissedUrgentKey = `plmun-dismissed-urgent-${user.id}`;
   const getDismissedUrgentIds = () => {
@@ -555,7 +556,7 @@ function NotificationCenter({
                   <button
                     onClick={markAllRead}
                     disabled={notificationBusy}
-                    className="inline-flex min-h-10 items-center gap-2 rounded-lg px-3 text-[10px] font-bold text-[#285c43] hover:bg-[#eaf1eb] disabled:opacity-60"
+                    className="hidden sm:inline-flex min-h-10 items-center gap-2 rounded-lg px-3 text-[10px] font-bold text-[#285c43] hover:bg-[#eaf1eb] disabled:opacity-60"
                   >
                     {notificationBusy && (
                       <RefreshCw size={12} className="animate-spin" aria-hidden="true" />
@@ -563,60 +564,130 @@ function NotificationCenter({
                     Mark all as read
                   </button>
                 )}
+                <button
+                  onClick={() => setOpen(false)}
+                  className="sm:hidden grid size-9 shrink-0 place-items-center rounded-lg text-[#68766e] hover:bg-[#edf1ec]"
+                  aria-label="Close notifications"
+                >
+                  <X size={18} />
+                </button>
               </header>
               <div className="overflow-y-auto">
-                {notifications.map((notification) => (
-                  <article
-                    key={notification.id}
-                    className={`notification-item group relative min-h-24 w-full border-b border-[#e7eae5] text-left transition ${
-                      notification.readAt ? "bg-white" : "bg-[#f0f6ef]"
-                    }`}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => readNotification(notification)}
-                      className="flex min-h-24 w-full gap-3 p-4 pr-12 text-left"
+                {notifications.map((notification) => {
+                  const canDismiss = notificationCanDismiss(notification);
+                  const isSwiped = swipedId === notification.id;
+                  
+                  return (
+                    <article
+                      key={notification.id}
+                      className={`notification-item group relative min-h-24 w-full border-b border-[#e7eae5] text-left transition ${
+                        notification.readAt ? "bg-white" : "bg-[#f0f6ef]"
+                      } overflow-hidden`}
                     >
-                      <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-white shadow-sm">
-                        {notificationIcon(notification)}
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="flex items-start justify-between gap-3">
-                          <span className="text-xs font-bold text-[#29473a]">
-                            {notification.title}
+                      {/* Delete button background (revealed on swipe) */}
+                      {canDismiss && (
+                        <div className="absolute inset-y-0 right-0 flex w-20 items-center justify-center bg-[#a13f32] sm:hidden">
+                          <Trash2 size={20} className="text-white" />
+                        </div>
+                      )}
+                      
+                      {/* Swipeable content */}
+                      <div
+                        className={`relative bg-inherit transition-transform duration-300 sm:transform-none ${
+                          isSwiped && canDismiss ? "-translate-x-20" : "translate-x-0"
+                        }`}
+                        onTouchStart={(e) => {
+                          if (window.innerWidth >= 640) return; // Only on mobile
+                          const touch = e.touches[0];
+                          if (!touch) return;
+                          const startX = touch.clientX;
+                          const startY = touch.clientY;
+                          let hasSwiped = false;
+
+                          const onTouchMove = (moveEvent: TouchEvent) => {
+                            const moveTouch = moveEvent.touches[0];
+                            if (!moveTouch) return;
+                            const deltaX = startX - moveTouch.clientX;
+                            const deltaY = Math.abs(startY - moveTouch.clientY);
+                            
+                            // Only swipe left, and ensure horizontal swipe
+                            if (deltaX > 30 && deltaY < 30 && !hasSwiped) {
+                              hasSwiped = true;
+                              setSwipedId(notification.id);
+                            } else if (deltaX < -30 && !hasSwiped) {
+                              hasSwiped = true;
+                              setSwipedId(null);
+                            }
+                          };
+
+                          const onTouchEnd = () => {
+                            document.removeEventListener("touchmove", onTouchMove);
+                            document.removeEventListener("touchend", onTouchEnd);
+                          };
+
+                          document.addEventListener("touchmove", onTouchMove);
+                          document.addEventListener("touchend", onTouchEnd);
+                        }}
+                        onClick={() => {
+                          if (isSwiped && canDismiss) {
+                            void removeNotification(notification);
+                            setSwipedId(null);
+                          }
+                        }}
+                      >
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            if (isSwiped) {
+                              e.stopPropagation();
+                              return;
+                            }
+                            readNotification(notification);
+                          }}
+                          className="flex min-h-24 w-full gap-3 p-4 pr-12 text-left"
+                        >
+                          <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-white shadow-sm">
+                            {notificationIcon(notification)}
                           </span>
-                          {!notification.readAt && (
-                            <span className="mt-1 size-2 shrink-0 rounded-full bg-[#2f7651]" />
-                          )}
-                        </span>
-                        <span className="mt-1 block text-[11px] leading-5 text-[#5e6d64]">
-                          {notification.message}
-                        </span>
-                        <span className="mt-1.5 block text-[10px] font-semibold text-[#78857d]">
-                          {notificationTime(notification.createdAt)}
-                        </span>
-                      </span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void removeNotification(notification)}
-                      disabled={!notificationCanDismiss(notification)}
-                      className="absolute right-2.5 top-2.5 grid size-8 place-items-center rounded-lg text-[#849087] opacity-0 transition hover:bg-[#dfe7df] hover:text-[#315140] focus:opacity-100 group-hover:opacity-100 disabled:text-[#b7beb9] disabled:hover:bg-transparent"
-                      aria-label={
-                        notificationCanDismiss(notification)
-                          ? `Permanently remove ${notification.title}`
-                          : `${notification.title} cannot be removed until it is resolved`
-                      }
-                      title={
-                        notificationCanDismiss(notification)
-                          ? "Permanently remove notification"
-                          : "This notification can be removed after it is resolved"
-                      }
-                    >
-                      <X size={14} />
-                    </button>
-                  </article>
-                ))}
+                          <span className="min-w-0 flex-1">
+                            <span className="flex items-start justify-between gap-3">
+                              <span className="text-xs font-bold text-[#29473a]">
+                                {notification.title}
+                              </span>
+                              {!notification.readAt && (
+                                <span className="mt-1 size-2 shrink-0 rounded-full bg-[#2f7651]" />
+                              )}
+                            </span>
+                            <span className="mt-1 block text-[11px] leading-5 text-[#5e6d64]">
+                              {notification.message}
+                            </span>
+                            <span className="mt-1.5 block text-[10px] font-semibold text-[#78857d]">
+                              {notificationTime(notification.createdAt)}
+                            </span>
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void removeNotification(notification)}
+                          disabled={!canDismiss}
+                          className="absolute right-2.5 top-2.5 hidden sm:grid size-8 place-items-center rounded-lg text-[#849087] opacity-0 transition hover:bg-[#dfe7df] hover:text-[#315140] focus:opacity-100 group-hover:opacity-100 disabled:text-[#b7beb9] disabled:hover:bg-transparent"
+                          aria-label={
+                            canDismiss
+                              ? `Permanently remove ${notification.title}`
+                              : `${notification.title} cannot be removed until it is resolved`
+                          }
+                          title={
+                            canDismiss
+                              ? "Permanently remove notification"
+                              : "This notification can be removed after it is resolved"
+                          }
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+                    </article>
+                  );
+                })}
                 {!loading && !notifications.length && (
                   <div className="grid min-h-52 place-items-center p-8 text-center">
                     <div>
