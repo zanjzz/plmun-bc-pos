@@ -594,7 +594,7 @@ function NotificationCenter({
                             void removeNotification(notification);
                             setSwipedId(null);
                           }}
-                          className="absolute inset-y-0 right-0 z-0 flex w-20 items-center justify-center bg-[#a13f32] sm:hidden"
+                          className="absolute inset-y-0 right-0 flex w-20 items-center justify-center bg-[#a13f32] sm:hidden"
                           aria-label={`Delete ${notification.title}`}
                         >
                           <Trash2 size={20} className="text-white" />
@@ -603,7 +603,7 @@ function NotificationCenter({
                       
                       {/* Swipeable content */}
                       <div
-                        className={`relative z-10 bg-inherit transition-transform duration-300 sm:transform-none ${
+                        className={`relative bg-inherit transition-transform duration-300 sm:transform-none ${
                           isSwiped && canDismiss ? "-translate-x-20" : "translate-x-0"
                         }`}
                         onTouchStart={(e) => {
