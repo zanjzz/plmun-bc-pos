@@ -31,6 +31,9 @@ export const demoAccounts = [
 
 const sessionKey = "plmun-bc-user";
 
+// Prevent cross-tab interference - each tab maintains its own session
+let localSessionId = `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
 export const authProvider: AuthProvider = {
   async signIn(credentials) {
     const preset = demoAccounts.find(
@@ -46,7 +49,8 @@ export const authProvider: AuthProvider = {
       },
     );
     storeAccessToken(result.accessToken);
-    window.localStorage.setItem(sessionKey, JSON.stringify(result.user));
+    // Store with session ID to prevent cross-tab conflicts
+    window.localStorage.setItem(`${sessionKey}-${localSessionId}`, JSON.stringify(result.user));
     return result.user;
   },
 
@@ -56,13 +60,14 @@ export const authProvider: AuthProvider = {
       body: JSON.stringify(details),
     });
     storeAccessToken(result.accessToken);
-    window.localStorage.setItem(sessionKey, JSON.stringify(result.user));
+    // Store with session ID to prevent cross-tab conflicts
+    window.localStorage.setItem(`${sessionKey}-${localSessionId}`, JSON.stringify(result.user));
     return result.user;
   },
 
   async signOut() {
     clearAccessToken();
-    window.localStorage.removeItem(sessionKey);
+    window.localStorage.removeItem(`${sessionKey}-${localSessionId}`);
   },
 
   async restoreSession() {
@@ -70,11 +75,11 @@ export const authProvider: AuthProvider = {
     if (!token) return null;
     try {
       const result = await apiRequest<{ user: AuthUser }>("/auth/me", {}, true);
-      window.localStorage.setItem(sessionKey, JSON.stringify(result.user));
+      window.localStorage.setItem(`${sessionKey}-${localSessionId}`, JSON.stringify(result.user));
       return result.user;
     } catch {
       clearAccessToken();
-      window.localStorage.removeItem(sessionKey);
+      window.localStorage.removeItem(`${sessionKey}-${localSessionId}`);
       return null;
     }
   },
@@ -82,13 +87,13 @@ export const authProvider: AuthProvider = {
 
 export function readStoredSession(): AuthUser | null {
   if (!getAccessToken()) return null;
-  const stored = window.localStorage.getItem(sessionKey);
+  const stored = window.localStorage.getItem(`${sessionKey}-${localSessionId}`);
   if (!stored) return null;
   try {
     return JSON.parse(stored) as AuthUser;
   } catch {
     clearAccessToken();
-    window.localStorage.removeItem(sessionKey);
+    window.localStorage.removeItem(`${sessionKey}-${localSessionId}`);
     return null;
   }
 }

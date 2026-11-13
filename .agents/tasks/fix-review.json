@@ -1,0 +1,10 @@
+{
+  "verdict": "CHANGES_REQUESTED",
+  "findings": [
+    "Branches out of sync — Main branch kept preventDefault and stopPropagation in the delete button onClick handler. Survey-student-only removed them. These branches must have identical behavior for both issues. Apply main's approach (keep the event handlers) to survey-student-only.",
+    "Event handler removal causes mark-as-read — Survey-student-only's delete button no longer calls preventDefault or stopPropagation, so tapping it will bubble up to the parent notification button and mark the notification as read. This is wrong. The fix is already correct on main; port it to survey-student-only.",
+    "Z-index removal claim vs actual fix — Both commits claim they 'removed z-index from both button and content,' but the diff shows they actually removed z-10 from the delete button (which was making it visible on top) and z-0 from swipeable content. The fix itself is correct, but the commit message description is backwards: the button had z-10 (not z-0), and that's what was making it permanently visible.",
+    "Concurrent session fix scoped to demo accounts only — The password update removal only applies to the demo login endpoint. Real user accounts that share credentials (if that's even possible) would still face session invalidation if they logged in concurrently. Clarify whether this is intentional or if real accounts also need this protection."
+  ],
+  "reviewDoc": "c:\\Users\\zdllz\\OneDrive\\Documents\\Zanj_codes\\plmun-bc-pos\\.agents\\tasks\\fix-review.md"
+}
