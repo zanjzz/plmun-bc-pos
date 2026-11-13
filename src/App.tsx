@@ -605,12 +605,12 @@ function NotificationCenter({
                           isSwiped && canDismiss ? "-translate-x-20" : "translate-x-0"
                         }`}
                         onTouchStart={(e) => {
-                          if (window.innerWidth >= 640) return; // Only on mobile
+                          if (window.innerWidth >= 640 || !canDismiss) return; // Only on mobile with dismissible notifications
                           const touch = e.touches[0];
                           if (!touch) return;
                           const startX = touch.clientX;
                           const startY = touch.clientY;
-                          let hasSwiped = false;
+                          let hasMoved = false;
 
                           const onTouchMove = (moveEvent: TouchEvent) => {
                             const moveTouch = moveEvent.touches[0];
@@ -618,29 +618,43 @@ function NotificationCenter({
                             const deltaX = startX - moveTouch.clientX;
                             const deltaY = Math.abs(startY - moveTouch.clientY);
                             
-                            // Only swipe left, and ensure horizontal swipe
-                            if (deltaX > 30 && deltaY < 30 && !hasSwiped) {
-                              hasSwiped = true;
-                              setSwipedId(notification.id);
-                            } else if (deltaX < -30 && !hasSwiped) {
-                              hasSwiped = true;
-                              setSwipedId(null);
+                            // If moving horizontally more than vertically, it's a swipe
+                            if (Math.abs(deltaX) > 10 && Math.abs(deltaX) > deltaY) {
+                              hasMoved = true;
                             }
                           };
 
-                          const onTouchEnd = () => {
+                          const onTouchEnd = (endEvent: TouchEvent) => {
+                            const endTouch = endEvent.changedTouches[0];
+                            if (!endTouch) return;
+                            
+                            const deltaX = startX - endTouch.clientX;
+                            const deltaY = Math.abs(startY - endTouch.clientY);
+                            
+                            // Swipe left to reveal delete (deltaX > 0)
+                            if (deltaX > 50 && deltaY < 50 && hasMoved) {
+                              setSwipedId(notification.id);
+                            } 
+                            // Swipe right to hide delete (deltaX < 0)
+                            else if (deltaX < -50 && deltaY < 50 && hasMoved) {
+                              setSwipedId(null);
+                            }
+                            
                             document.removeEventListener("touchmove", onTouchMove);
                             document.removeEventListener("touchend", onTouchEnd);
                           };
 
-                          document.addEventListener("touchmove", onTouchMove);
-                          document.addEventListener("touchend", onTouchEnd);
+                          document.addEventListener("touchmove", onTouchMove, { passive: true });
+                          document.addEventListener("touchend", onTouchEnd, { passive: true });
                         }}
                       >
                         <button
                           type="button"
                           onClick={(e) => {
                             if (isSwiped) {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setSwipedId(null);
                               return;
                             }
                             readNotification(notification);
