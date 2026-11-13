@@ -393,12 +393,12 @@ html[data-theme="dark"] body::after {
 
 .app-shell [class*="text-[9px]"],
 .login-shell [class*="text-[9px]"] {
-  font-size: 0.625rem;
+  font-size: 0.6875rem;
 }
 
 .app-shell [class*="text-[10px]"],
 .login-shell [class*="text-[10px]"] {
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
 }
 
 .filter-toolbar {

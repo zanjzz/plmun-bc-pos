@@ -45,6 +45,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { type AuthUser, authProvider, readStoredSession, type Role } from "./auth";
+import { type Cart, type CartLine, loadStoredCart, saveStoredCart } from "./cart";
 import Login from "./Login";
 import {
   type AppNotification,
@@ -93,17 +94,6 @@ type ProductStore = {
   removeProduct: (id: number) => Promise<void>;
   refreshProducts: () => Promise<void>;
 };
-
-type CartLine = {
-  productId: number;
-  variationId: number | null;
-  variationValues: Record<string, string>;
-  variationLabel: string | null;
-  unitPrice: number;
-  quantity: number;
-};
-
-type Cart = Record<string, CartLine>;
 
 const ProductContext = createContext<ProductStore | null>(null);
 
@@ -924,6 +914,7 @@ function Header({
               <button
                 key={item}
                 onClick={() => setPage(item)}
+                aria-current={page === item ? "page" : undefined}
                 className={`h-full border-b-2 px-2.5 text-xs font-semibold transition-colors ${page === item ? "border-[#184d37] text-[#184d37]" : "border-transparent text-[#687168] hover:text-[#184d37]"}`}
               >
                 {item}
@@ -1056,6 +1047,7 @@ function Header({
                         setPage(item);
                         setMobileOpen(false);
                       }}
+                      aria-current={page === item ? "page" : undefined}
                       className={`flex min-h-12 w-full items-center gap-3 rounded-xl px-3.5 py-3 text-left text-sm font-semibold transition ${page === item ? "bg-[#e8efe8] text-[#184d37]" : "text-[#4d6056] hover:bg-[#f0f2ed]"}`}
                     >
                       <span className="grid size-8 place-items-center rounded-lg bg-white shadow-sm">
@@ -1102,6 +1094,7 @@ function Sidebar({
             <button
               key={item}
               onClick={() => setPage(item)}
+              aria-current={page === item ? "page" : undefined}
               className={`flex min-h-11 w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-xs font-semibold transition-colors duration-200 ${page === item ? "bg-[#184d37] text-white shadow-[0_8px_18px_rgba(24,77,55,.16)]" : "text-[#57675e] hover:bg-[#e8ece4]"}`}
             >
               <Icon size={16} strokeWidth={1.8} /> {item}
@@ -1395,6 +1388,7 @@ function ProductsPage({
       />
       <div className="catalog-filters mb-6">
         <label className="filter-search block w-full">
+          <span className="sr-only">{serviceOnly ? "Search services" : "Search products"}</span>
           <Search
             size={15}
             className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#8b958d]"
@@ -1410,8 +1404,9 @@ function ProductsPage({
           {categories.map((c) => (
             <button
               key={c}
+              type="button"
               onClick={() => setCategory(c)}
-              className={`rounded-full px-3.5 py-2 text-[11px] font-semibold transition ${category === c ? "bg-[#184d37] text-white shadow-sm" : "border border-[#d7ddd3] bg-white text-[#56655d] hover:border-[#8fa191]"}`}
+              className={`min-h-11 rounded-full px-3.5 py-2 text-[11px] font-semibold transition ${category === c ? "bg-[#184d37] text-white shadow-sm" : "border border-[#d7ddd3] bg-white text-[#56655d] hover:border-[#8fa191]"}`}
             >
               {c}
             </button>
@@ -1441,11 +1436,62 @@ function CartPage({
   setCart: React.Dispatch<React.SetStateAction<Cart>>;
   setPage: (p: string) => void;
 }) {
-  const { products } = useProductStore();
+  const { products, loading } = useProductStore();
+  useEffect(() => {
+    if (loading) return;
+    setCart((current) => {
+      let changed = false;
+      const next: Cart = {};
+      for (const [key, line] of Object.entries(current)) {
+        const product = products.find((candidate) => candidate.id === line.productId);
+        const variation = line.variationId
+          ? product?.variations?.find((candidate) => candidate.id === line.variationId)
+          : null;
+        const stock = variation?.stock ?? product?.stock ?? 0;
+        if (
+          !product ||
+          (product.productType === "variable" && (!variation || !variation.active)) ||
+          stock <= 0
+        ) {
+          changed = true;
+          continue;
+        }
+        const quantity = Math.min(line.quantity, stock);
+        const updated: CartLine = {
+          ...line,
+          quantity,
+          unitPrice: variation?.price ?? product.price,
+          variationValues: variation?.values ?? line.variationValues,
+          variationLabel: variation ? variationLabel(variation.values) : null,
+        };
+        if (
+          quantity !== line.quantity ||
+          updated.unitPrice !== line.unitPrice ||
+          updated.variationLabel !== line.variationLabel
+        ) {
+          changed = true;
+        }
+        next[key] = updated;
+      }
+      return changed ? next : current;
+    });
+  }, [loading, products, setCart]);
   const lines = Object.entries(cart)
     .map(([key, line]) => {
       const product = products.find((candidate) => candidate.id === line.productId);
-      return product ? { ...product, ...line, key } : null;
+      const variation = line.variationId
+        ? product?.variations?.find((candidate) => candidate.id === line.variationId)
+        : null;
+      return product
+        ? {
+            ...product,
+            ...line,
+            key,
+            stock: variation?.stock ?? product.stock,
+            unitPrice: variation?.price ?? product.price,
+            image: variation?.image || product.image,
+          }
+        : null;
     })
     .filter(Boolean) as Array<Product & CartLine & { key: string }>;
   const total = lines.reduce((sum, p) => sum + p.unitPrice * p.quantity, 0);
@@ -1487,14 +1533,20 @@ function CartPage({
                   <div className="mt-1 text-xs text-[#889188]">{peso(p.unitPrice)} each</div>
                 </div>
                 <div className="flex items-center rounded-md border border-[#d9ded5]">
-                  <button onClick={() => change(p.key, -1)} className="px-3 py-2">
+                  <button
+                    type="button"
+                    onClick={() => change(p.key, -1)}
+                    className="grid size-11 place-items-center"
+                    aria-label={`Decrease ${p.name} quantity`}
+                  >
                     −
                   </button>
                   <span className="w-8 text-center text-xs">{p.quantity}</span>
                   <button
                     onClick={() => change(p.key, 1)}
                     disabled={p.quantity >= p.stock}
-                    className="px-3 py-2 disabled:opacity-35"
+                    className="grid size-11 place-items-center disabled:opacity-35"
+                    aria-label={`Increase ${p.name} quantity`}
                   >
                     +
                   </button>
@@ -2314,7 +2366,15 @@ function AdminReportsPage() {
   );
 }
 
-function Dashboard({ role, setPage }: { role: Role; setPage: (p: string) => void }) {
+function Dashboard({
+  role,
+  userName,
+  setPage,
+}: {
+  role: Role;
+  userName: string;
+  setPage: (p: string) => void;
+}) {
   const { products } = useProductStore();
   const [onlineOrders, setOnlineOrders] = useState<OnlineOrder[]>([]);
   const [reports, setReports] = useState<AdminReportData | null>(null);
@@ -2329,7 +2389,7 @@ function Dashboard({ role, setPage }: { role: Role; setPage: (p: string) => void
     <>
       <SectionTitle
         title={role === "staff" ? "Staff dashboard" : "Administrator dashboard"}
-        subtitle={`Welcome back, Alex. Here’s what’s happening ${role === "staff" ? "today" : "across the center"}.`}
+        subtitle={`Welcome back, ${userName}. Here’s what’s happening ${role === "staff" ? "today" : "across the center"}.`}
         action={
           role === "admin" ? (
             <Button onClick={() => setPage("Sales & transactions")}>View sales</Button>
@@ -5047,16 +5107,16 @@ function Footer({ setPage }: { setPage: (page: string) => void }) {
             </span>
             <div className="text-xs font-bold tracking-[.1em]">PLMUN BUSINESS CENTER</div>
           </div>
-          <p className="mt-5 text-xs leading-6 text-white/58">
+          <p className="mt-5 text-xs leading-6 text-white/75">
             Reliable campus essentials and document services for the PLMun community, available
             online and ready for convenient pickup.
           </p>
         </div>
         <div>
-          <div className="text-[10px] font-bold uppercase tracking-[.18em] text-white/45">
+          <div className="text-[10px] font-bold uppercase tracking-[.18em] text-white/65">
             Explore
           </div>
-          <div className="mt-4 grid gap-3 text-xs text-white/68">
+          <div className="mt-4 grid gap-3 text-xs text-white/80">
             {["Products", "Services", "My orders"].map((item) => (
               <button
                 key={item}
@@ -5069,10 +5129,10 @@ function Footer({ setPage }: { setPage: (page: string) => void }) {
           </div>
         </div>
         <div>
-          <div className="text-[10px] font-bold uppercase tracking-[.18em] text-white/45">
+          <div className="text-[10px] font-bold uppercase tracking-[.18em] text-white/65">
             Visit the center
           </div>
-          <div className="mt-4 space-y-3 text-xs leading-5 text-white/68">
+          <div className="mt-4 space-y-3 text-xs leading-5 text-white/80">
             <div className="flex items-start gap-2.5">
               <MapPin size={15} className="mt-0.5 shrink-0 text-[#9fbca5]" />
               PLMun Campus, Muntinlupa City
@@ -5089,7 +5149,7 @@ function Footer({ setPage }: { setPage: (page: string) => void }) {
         </div>
       </div>
       <div className="border-t border-white/8">
-        <div className="mx-auto flex max-w-[1270px] flex-wrap items-center justify-between gap-3 px-6 py-5 text-[9px] text-white/38 sm:px-9">
+        <div className="mx-auto flex max-w-[1270px] flex-wrap items-center justify-between gap-3 px-6 py-5 text-[9px] text-white/60 sm:px-9">
           <span>© {new Date().getFullYear()} Pamantasan ng Lungsod ng Muntinlupa</span>
           <span>Built for better campus service</span>
         </div>
@@ -5109,7 +5169,9 @@ export default function App() {
   const [sessionChecking, setSessionChecking] = useState(Boolean(storedSession));
   const [page, setPage] = useState("Home");
   const [pageHistory, setPageHistory] = useState<string[]>([]);
-  const [cart, setCart] = useState<Cart>({});
+  const [cart, setCart] = useState<Cart>(() =>
+    storedSession?.role === "student" ? loadStoredCart(storedSession.id) : {},
+  );
   const [selected, setSelected] = useState<Product | null>(null);
   const [selectedQuantity, setSelectedQuantity] = useState(1);
   const [selectedOptions, setSelectedOptions] = useState<Record<string, string>>({});
@@ -5129,12 +5191,18 @@ export default function App() {
     if (themeColor) themeColor.content = theme === "dark" ? "#101112" : "#123d2c";
   }, [theme]);
   useEffect(() => {
+    if (user?.role === "student") saveStoredCart(user.id, cart);
+  }, [cart, user?.id, user?.role]);
+  useEffect(() => {
     if (!storedSession) return;
     let active = true;
     authProvider
       .restoreSession()
       .then((restored) => {
-        if (active) setUser(restored);
+        if (active) {
+          setUser(restored);
+          setCart(restored?.role === "student" ? loadStoredCart(restored.id) : {});
+        }
       })
       .finally(() => {
         if (active) setSessionChecking(false);
@@ -5189,6 +5257,7 @@ export default function App() {
   };
   const add = (p: Product, quantity = 1, variation: ProductVariation | null = null) => {
     const key = `${p.id}:${variation?.id ?? "standard"}`;
+    const stock = variation?.stock ?? p.stock;
     setCart((current) => ({
       ...current,
       [key]: {
@@ -5197,7 +5266,7 @@ export default function App() {
         variationValues: variation?.values ?? {},
         variationLabel: variation ? variationLabel(variation.values) : null,
         unitPrice: variation?.price ?? p.price,
-        quantity: (current[key]?.quantity ?? 0) + quantity,
+        quantity: Math.min(stock, (current[key]?.quantity ?? 0) + quantity),
       },
     }));
     setToast(
@@ -5246,6 +5315,7 @@ export default function App() {
         theme={theme}
         onAuthenticated={(nextUser) => {
           window.sessionStorage.removeItem(`plmun-urgent-shown-${nextUser.id}`);
+          setCart(nextUser.role === "student" ? loadStoredCart(nextUser.id) : {});
           setUser(nextUser);
           setSessionChecking(false);
           setPage(nextUser.role === "student" ? "Home" : "Dashboard");
@@ -5258,6 +5328,7 @@ export default function App() {
 
   const role = user.role;
   const signOut = async () => {
+    if (user.role === "student") saveStoredCart(user.id, cart);
     await authProvider.signOut();
     setUser(null);
     setPage("Home");
@@ -5320,7 +5391,8 @@ export default function App() {
       if (page === "Order detail") return <OrderDetailPage />;
       return <OrdersPage setPage={navigate} />;
     }
-    if (page === "Dashboard") return <Dashboard role={role} setPage={navigate} />;
+    if (page === "Dashboard")
+      return <Dashboard role={role} userName={user.name} setPage={navigate} />;
     if (role === "staff" && page === "POS terminal") return <PosTerminal />;
     if (role === "staff" && page === "Order management") return <OrderManagementPage />;
     if (
