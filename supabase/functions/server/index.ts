@@ -3,8 +3,9 @@ import { Hono } from "npm:hono";
 import { cors } from "npm:hono/cors";
 import { logger } from "npm:hono/logger";
 
-const app = new Hono();
-const prefix = "/server/make-server-2e4384b4";
+const functionName = "server";
+const app = new Hono().basePath(`/${functionName}`);
+const prefix = "/make-server-2e4384b4";
 
 app.use("*", logger(console.log));
 app.use(
@@ -644,7 +645,9 @@ async function reconcileOnlineOrders() {
   return changed;
 }
 
-app.get(`${prefix}/health`, (c) => c.json({ status: "ok", storage: "relational" }));
+app.get(`${prefix}/health`, (c) =>
+  c.json({ status: "ok", storage: "relational", version: "variations-inventory-v3" }),
+);
 
 app.post(`${prefix}/auth/login`, async (c) => {
   const { email, password } = await c.req.json();
