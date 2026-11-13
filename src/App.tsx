@@ -11,6 +11,7 @@ import {
   ClipboardList,
   Clock3,
   Home,
+  ImagePlus,
   LayoutDashboard,
   LogOut,
   Mail,
@@ -23,7 +24,6 @@ import {
   Printer,
   Plus,
   RefreshCw,
-  RotateCcw,
   Save,
   ScanLine,
   Search,
@@ -35,6 +35,7 @@ import {
   Store,
   Sun,
   Trash2,
+  Upload,
   UserPlus,
   Users,
   UserX,
@@ -63,24 +64,45 @@ import {
 import {
   createProduct,
   deleteProduct,
-  fallbackProducts,
   getProducts,
   isPhysicalProduct,
   isServiceProduct,
   type Product,
+  uploadProductImage,
   updateProduct,
 } from "./products";
 import { type AdminReportData, getAdminReports } from "./reports";
 import { createUser, getUsers, type ManagedUser, removeUser, updateUser } from "./users";
+import {
+  generateVariationValues,
+  isOptionValueAvailable,
+  mergeGeneratedVariations,
+  type ProductAttribute,
+  type ProductVariation,
+  variationKey,
+  variationLabel,
+} from "./variations";
 
 type ProductStore = {
   products: Product[];
   loading: boolean;
+  error: string | null;
   addProduct: (product: Omit<Product, "id">) => Promise<void>;
   editProduct: (id: number, updates: Partial<Product>) => Promise<void>;
   removeProduct: (id: number) => Promise<void>;
   refreshProducts: () => Promise<void>;
 };
+
+type CartLine = {
+  productId: number;
+  variationId: number | null;
+  variationValues: Record<string, string>;
+  variationLabel: string | null;
+  unitPrice: number;
+  quantity: number;
+};
+
+type Cart = Record<string, CartLine>;
 
 const ProductContext = createContext<ProductStore | null>(null);
 
@@ -91,19 +113,26 @@ function useProductStore() {
 }
 
 function ProductDataProvider({ children }: { children: React.ReactNode }) {
-  const [products, setProducts] = useState(fallbackProducts);
+  const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     getProducts()
-      .then(setProducts)
-      .catch((error) => console.error("Unable to load products:", error))
+      .then((items) => {
+        setProducts(items);
+        setError(null);
+      })
+      .catch((reason) =>
+        setError(reason instanceof Error ? reason.message : "Products could not be loaded."),
+      )
       .finally(() => setLoading(false));
   }, []);
 
   const store: ProductStore = {
     products,
     loading,
+    error,
     addProduct: async (input) => {
       const product = await createProduct(input);
       setProducts((current) => [...current, product]);
@@ -117,7 +146,16 @@ function ProductDataProvider({ children }: { children: React.ReactNode }) {
       setProducts((current) => current.filter((item) => item.id !== id));
     },
     refreshProducts: async () => {
-      setProducts(await getProducts());
+      setLoading(true);
+      try {
+        setProducts(await getProducts());
+        setError(null);
+      } catch (reason) {
+        setError(reason instanceof Error ? reason.message : "Products could not be loaded.");
+        throw reason;
+      } finally {
+        setLoading(false);
+      }
     },
   };
 
@@ -555,7 +593,7 @@ function NotificationCenter({
                 />
                 Don’t remind me again.
               </label>
-              <div className="mt-5 flex flex-col gap-2 sm:flex-row-reverse">
+              <div className="responsive-cta-group mt-5">
                 <Button className="w-full sm:flex-1" onClick={reviewUrgent}>
                   Review now
                 </Button>
@@ -626,6 +664,29 @@ function Button({
     >
       {loading && <RefreshCw size={14} className="shrink-0 animate-spin" aria-hidden="true" />}
       {children}
+    </button>
+  );
+}
+
+function ClearFiltersButton({
+  disabled,
+  onClick,
+  label = "Clear filters",
+}: {
+  disabled: boolean;
+  onClick: () => void;
+  label?: string;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className="filter-clear-button"
+      aria-label={label}
+      title={label}
+    >
+      <Trash2 size={16} />
     </button>
   );
 }
@@ -751,10 +812,7 @@ function ConfirmationDialog({
         <p id="confirmation-dialog-description" className="mt-2 text-sm leading-6 text-[#5f6d65]">
           {config.message}
         </p>
-        <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-          <Button kind="secondary" onClick={onClose} disabled={busy} className="w-full sm:w-auto">
-            Cancel
-          </Button>
+        <div className="responsive-cta-group mt-6">
           <button
             type="button"
             disabled={busy}
@@ -769,6 +827,9 @@ function ConfirmationDialog({
             {busy && <RefreshCw size={14} className="mr-2 animate-spin" aria-hidden="true" />}
             {busy ? "Please wait…" : config.confirmLabel}
           </button>
+          <Button kind="secondary" onClick={onClose} disabled={busy} className="w-full sm:w-auto">
+            Cancel
+          </Button>
         </div>
       </section>
     </div>,
@@ -1067,7 +1128,7 @@ function SectionTitle({
   action?: React.ReactNode;
 }) {
   return (
-    <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
+    <div className="section-title mb-5 flex flex-wrap items-end justify-between gap-3">
       <div>
         <h1 className="text-2xl font-semibold tracking-[-.02em] text-[#163c2e]">{title}</h1>
         {subtitle && <p className="mt-1 text-xs text-[#7d857e]">{subtitle}</p>}
@@ -1176,7 +1237,7 @@ function StudentHome({
   ];
   return (
     <>
-      <section className="animate-enter relative mb-12 overflow-hidden rounded-[24px] border border-white/60 bg-[#e7eadf] shadow-[0_20px_50px_rgba(31,62,46,.08)]">
+      <section className="student-hero animate-enter relative mb-12 overflow-hidden rounded-[24px] border border-white/60 bg-[#e7eadf] shadow-[0_20px_50px_rgba(31,62,46,.08)]">
         <div className="pointer-events-none absolute -left-20 -top-20 size-64 rounded-full bg-white/45 blur-3xl" />
         <div className="grid items-stretch lg:grid-cols-[1.08fr_.92fr]">
           <div className="relative p-7 sm:p-11 lg:p-14 xl:p-16">
@@ -1331,8 +1392,8 @@ function ProductsPage({
             : "Browse school supplies available for campus pickup."
         }
       />
-      <div className="mb-6">
-        <label className="relative block max-w-[420px]">
+      <div className="catalog-filters mb-6">
+        <label className="filter-search block w-full">
           <Search
             size={15}
             className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#8b958d]"
@@ -1341,7 +1402,7 @@ function ProductsPage({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder={serviceOnly ? "Search services" : "Search products"}
-            className="w-full rounded-lg border border-[#d9dfd5] bg-white py-2.5 pl-9 pr-3 text-xs outline-none focus:border-[#184d37]"
+            className="filter-control pl-9"
           />
         </label>
         <div className="mt-3 flex flex-wrap gap-2">
@@ -1375,15 +1436,28 @@ function CartPage({
   setCart,
   setPage,
 }: {
-  cart: Record<number, number>;
-  setCart: React.Dispatch<React.SetStateAction<Record<number, number>>>;
+  cart: Cart;
+  setCart: React.Dispatch<React.SetStateAction<Cart>>;
   setPage: (p: string) => void;
 }) {
   const { products } = useProductStore();
-  const lines = products.filter((p) => cart[p.id]).map((p) => ({ ...p, quantity: cart[p.id] }));
-  const total = lines.reduce((sum, p) => sum + p.price * p.quantity, 0);
-  const change = (id: number, delta: number) =>
-    setCart((c) => ({ ...c, [id]: Math.max(0, (c[id] || 0) + delta) }));
+  const lines = Object.entries(cart)
+    .map(([key, line]) => {
+      const product = products.find((candidate) => candidate.id === line.productId);
+      return product ? { ...product, ...line, key } : null;
+    })
+    .filter(Boolean) as Array<Product & CartLine & { key: string }>;
+  const total = lines.reduce((sum, p) => sum + p.unitPrice * p.quantity, 0);
+  const change = (key: string, delta: number) =>
+    setCart((current) => {
+      const nextQuantity = Math.max(0, current[key].quantity + delta);
+      if (!nextQuantity) {
+        const next = { ...current };
+        delete next[key];
+        return next;
+      }
+      return { ...current, [key]: { ...current[key], quantity: nextQuantity } };
+    });
   return (
     <>
       <SectionTitle title="Shopping cart" subtitle="Review your order before checkout." />
@@ -1392,7 +1466,7 @@ function CartPage({
           {lines.length ? (
             lines.map((p, i) => (
               <div
-                key={p.id}
+                key={p.key}
                 className={`flex flex-wrap items-center gap-4 p-4 ${i ? "border-t border-[#e6e8e2]" : ""}`}
               >
                 <img
@@ -1404,19 +1478,28 @@ function CartPage({
                 />
                 <div className="min-w-[180px] flex-1">
                   <div className="text-sm font-semibold text-[#1b4334]">{p.name}</div>
-                  <div className="mt-1 text-xs text-[#889188]">{peso(p.price)} each</div>
+                  {p.variationLabel && (
+                    <div className="mt-1 text-[10px] font-semibold text-[#607068]">
+                      {p.variationLabel}
+                    </div>
+                  )}
+                  <div className="mt-1 text-xs text-[#889188]">{peso(p.unitPrice)} each</div>
                 </div>
                 <div className="flex items-center rounded-md border border-[#d9ded5]">
-                  <button onClick={() => change(p.id, -1)} className="px-3 py-2">
+                  <button onClick={() => change(p.key, -1)} className="px-3 py-2">
                     −
                   </button>
                   <span className="w-8 text-center text-xs">{p.quantity}</span>
-                  <button onClick={() => change(p.id, 1)} className="px-3 py-2">
+                  <button
+                    onClick={() => change(p.key, 1)}
+                    disabled={p.quantity >= p.stock}
+                    className="px-3 py-2 disabled:opacity-35"
+                  >
                     +
                   </button>
                 </div>
                 <div className="w-20 text-right text-xs font-bold">
-                  {peso(p.price * p.quantity)}
+                  {peso(p.unitPrice * p.quantity)}
                 </div>
               </div>
             ))
@@ -1471,8 +1554,8 @@ function Checkout({
   user,
   onOrderCreated,
 }: {
-  cart: Record<number, number>;
-  setCart: React.Dispatch<React.SetStateAction<Record<number, number>>>;
+  cart: Cart;
+  setCart: React.Dispatch<React.SetStateAction<Cart>>;
   setPage: (p: string) => void;
   user: AuthUser;
   onOrderCreated: (order: OnlineOrder) => void;
@@ -1480,7 +1563,13 @@ function Checkout({
   const { products } = useProductStore();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const total = products.reduce((s, p) => s + (cart[p.id] || 0) * p.price, 0);
+  const lines = Object.entries(cart)
+    .map(([key, line]) => {
+      const product = products.find((candidate) => candidate.id === line.productId);
+      return product ? { ...product, ...line, key } : null;
+    })
+    .filter(Boolean) as Array<Product & CartLine & { key: string }>;
+  const total = lines.reduce((sum, line) => sum + line.unitPrice * line.quantity, 0);
   const defaultPickupDate = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
   const submit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -1489,9 +1578,11 @@ function Checkout({
     const form = new FormData(e.currentTarget);
     try {
       const order = await createOnlineOrder({
-        items: Object.entries(cart)
-          .filter(([, quantity]) => quantity > 0)
-          .map(([productId, quantity]) => ({ productId: Number(productId), quantity })),
+        items: lines.map((line) => ({
+          productId: line.productId,
+          quantity: line.quantity,
+          variationId: line.variationId,
+        })),
         pickupDate: String(form.get("pickupDate") ?? ""),
         pickupWindow: String(form.get("pickupWindow") ?? ""),
         notes: String(form.get("notes") ?? ""),
@@ -1552,16 +1643,15 @@ function Checkout({
         <aside className="h-fit rounded-lg border border-[#dde2d8] bg-white p-5">
           <h2 className="text-sm font-semibold">Order summary</h2>
           <div className="mt-4 space-y-3 text-xs">
-            {products
-              .filter((p) => cart[p.id])
-              .map((p) => (
-                <div key={p.id} className="flex justify-between text-[#657068]">
-                  <span>
-                    {cart[p.id]}× {p.name}
-                  </span>
-                  <span>{peso(p.price * cart[p.id])}</span>
-                </div>
-              ))}
+            {lines.map((line) => (
+              <div key={line.key} className="flex justify-between text-[#657068]">
+                <span>
+                  {line.quantity}× {line.name}
+                  {line.variationLabel ? ` · ${line.variationLabel}` : ""}
+                </span>
+                <span>{peso(line.unitPrice * line.quantity)}</span>
+              </div>
+            ))}
             <div className="flex justify-between border-t pt-3 text-sm font-bold text-[#173d2f]">
               <span>Total</span>
               <span>{peso(total)}</span>
@@ -1630,8 +1720,8 @@ function OrdersPage({ setPage }: { setPage: (p: string) => void }) {
           {error}
         </div>
       )}
-      <div className="mb-5 grid gap-2 rounded-xl border border-[#dce1d7] bg-white p-4 sm:grid-cols-2 xl:grid-cols-[minmax(220px,1fr)_210px_180px_auto]">
-        <label className="relative">
+      <div className="filter-toolbar mb-5">
+        <label className="filter-search">
           <span className="sr-only">Search orders</span>
           <Search
             size={15}
@@ -1641,7 +1731,17 @@ function OrdersPage({ setPage }: { setPage: (p: string) => void }) {
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search order number or item"
-            className="min-h-11 w-full rounded-lg border border-[#d8ddd4] pl-9 pr-3 text-xs"
+            className="filter-control pl-9"
+          />
+        </label>
+        <label>
+          <span className="sr-only">Filter orders by date</span>
+          <input
+            type="date"
+            value={dateFilter}
+            onChange={(event) => setDateFilter(event.target.value)}
+            className="filter-control px-3"
+            aria-label="Filter orders by date"
           />
         </label>
         <label>
@@ -1649,7 +1749,7 @@ function OrdersPage({ setPage }: { setPage: (p: string) => void }) {
           <select
             value={statusFilter}
             onChange={(event) => setStatusFilter(event.target.value)}
-            className="min-h-11 w-full rounded-lg border border-[#d8ddd4] bg-white px-3 text-xs"
+            className="filter-control px-3"
           >
             <option>All</option>
             {[
@@ -1664,28 +1764,14 @@ function OrdersPage({ setPage }: { setPage: (p: string) => void }) {
             ))}
           </select>
         </label>
-        <label>
-          <span className="sr-only">Filter orders by date</span>
-          <input
-            type="date"
-            value={dateFilter}
-            onChange={(event) => setDateFilter(event.target.value)}
-            className="min-h-11 w-full rounded-lg border border-[#d8ddd4] bg-white px-3 text-xs"
-            aria-label="Filter orders by date"
-          />
-        </label>
-        <Button
-          kind="secondary"
+        <ClearFiltersButton
           disabled={!query && statusFilter === "All" && !dateFilter}
           onClick={() => {
             setQuery("");
             setStatusFilter("All");
             setDateFilter("");
           }}
-          className="gap-2"
-        >
-          <RotateCcw size={14} /> Clear
-        </Button>
+        />
       </div>
       <h2 className="mb-3 text-sm font-semibold text-[#29483a]">Active orders</h2>
       <div className="space-y-3 md:hidden">
@@ -1921,6 +2007,7 @@ function OrderDetailPage() {
                 <div key={item.productId} className="flex justify-between gap-3">
                   <span>
                     {item.quantity}× {item.name}
+                    {item.size ? ` · Size ${item.size}` : ""}
                   </span>
                   <span>{peso(item.quantity * item.price)}</span>
                 </div>
@@ -2107,8 +2194,8 @@ function AdminReportsPage() {
             <section className="overflow-hidden rounded-xl border border-[#dce1d7] bg-white">
               <div className="border-b border-[#e3e6e1] p-4">
                 <h2 className="text-sm font-semibold text-[#29483a]">Recent transactions</h2>
-                <div className="mt-3 grid gap-2 sm:grid-cols-2 2xl:grid-cols-[minmax(180px,1fr)_140px_160px_auto]">
-                  <label className="relative">
+                <div className="filter-toolbar filter-toolbar-compact mt-3">
+                  <label className="filter-search">
                     <span className="sr-only">Search transactions</span>
                     <Search
                       size={14}
@@ -2118,20 +2205,8 @@ function AdminReportsPage() {
                       value={query}
                       onChange={(event) => setQuery(event.target.value)}
                       placeholder="Search reference or order"
-                      className="min-h-10 w-full rounded-lg border border-[#d8ddd4] pl-9 pr-3 text-[11px]"
+                      className="filter-control pl-9"
                     />
-                  </label>
-                  <label>
-                    <span className="sr-only">Filter by transaction source</span>
-                    <select
-                      value={sourceFilter}
-                      onChange={(event) => setSourceFilter(event.target.value)}
-                      className="min-h-10 w-full rounded-lg border border-[#d8ddd4] bg-white px-3 text-[11px]"
-                    >
-                      <option>All</option>
-                      <option value="walk-in">Walk-in</option>
-                      <option value="online">Online</option>
-                    </select>
                   </label>
                   <label>
                     <span className="sr-only">Filter transactions by date</span>
@@ -2139,22 +2214,30 @@ function AdminReportsPage() {
                       type="date"
                       value={dateFilter}
                       onChange={(event) => setDateFilter(event.target.value)}
-                      className="min-h-10 w-full rounded-lg border border-[#d8ddd4] bg-white px-3 text-[11px]"
+                      className="filter-control px-3"
                       aria-label="Filter transactions by date"
                     />
                   </label>
-                  <Button
-                    kind="secondary"
+                  <label>
+                    <span className="sr-only">Filter by transaction source</span>
+                    <select
+                      value={sourceFilter}
+                      onChange={(event) => setSourceFilter(event.target.value)}
+                      className="filter-control px-3"
+                    >
+                      <option>All</option>
+                      <option value="walk-in">Walk-in</option>
+                      <option value="online">Online</option>
+                    </select>
+                  </label>
+                  <ClearFiltersButton
                     disabled={!query && sourceFilter === "All" && !dateFilter}
                     onClick={() => {
                       setQuery("");
                       setSourceFilter("All");
                       setDateFilter("");
                     }}
-                    className="min-h-10 px-3"
-                  >
-                    Clear
-                  </Button>
+                  />
                 </div>
               </div>
               <div className="table-wrap max-h-[440px] overflow-y-auto">
@@ -2410,6 +2493,24 @@ function Dashboard({ role, setPage }: { role: Role; setPage: (p: string) => void
   );
 }
 
+type SaleLine = {
+  productId: number;
+  variationId: number | null;
+  variationLabel: string | null;
+  name: string;
+  image: string;
+  price: number;
+  stock: number;
+  quantity: number;
+};
+
+type Sale = Record<string, SaleLine>;
+
+type CatalogSaleItem = Omit<SaleLine, "quantity"> & {
+  key: string;
+  category: string;
+};
+
 function ProductSelectionModal({
   products,
   currentSale,
@@ -2417,28 +2518,57 @@ function ProductSelectionModal({
   onClose,
 }: {
   products: Product[];
-  currentSale: Record<number, number>;
-  onAdd: (selection: Record<number, number>) => void;
+  currentSale: Sale;
+  onAdd: (selection: Sale) => void;
   onClose: () => void;
 }) {
-  const [selection, setSelection] = useState<Record<number, number>>({});
+  const [selection, setSelection] = useState<Sale>({});
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("All");
   const [availability, setAvailability] = useState("All");
   const categories = ["All", ...new Set(products.map((product) => product.category))];
-  const shown = products.filter((product) => {
-    const matchesQuery = product.name.toLowerCase().includes(query.trim().toLowerCase());
-    const matchesCategory = category === "All" || product.category === category;
-    const remaining = product.stock - (currentSale[product.id] || 0);
-    const matchesAvailability =
-      availability === "All" ||
-      (availability === "Available" && remaining > 0) ||
-      (availability === "Low stock" && remaining > 0 && remaining < 20) ||
-      (availability === "Unavailable" && remaining <= 0);
-    return matchesQuery && matchesCategory && matchesAvailability;
+  const catalogItems = products.flatMap<CatalogSaleItem>((product) => {
+    if (product.productType === "variable") {
+      return (product.variations ?? [])
+        .filter((variation) => variation.active)
+        .map((variation) => ({
+          key: `${product.id}:${variation.id}`,
+          productId: product.id,
+          variationId: variation.id ?? null,
+          variationLabel: variationLabel(variation.values),
+          name: product.name,
+          category: product.category,
+          image: variation.image || product.image,
+          price: variation.price,
+          stock: variation.stock,
+        }));
+    }
+    return [
+      {
+        key: `${product.id}:simple`,
+        productId: product.id,
+        variationId: null,
+        variationLabel: null,
+        name: product.name,
+        category: product.category,
+        image: product.image,
+        price: product.price,
+        stock: product.stock,
+      },
+    ];
   });
-  const selectedUnits = Object.values(selection).reduce((sum, quantity) => sum + quantity, 0);
-
+  const shown = catalogItems.filter((item) => {
+    const remaining = item.stock - (currentSale[item.key]?.quantity ?? 0);
+    return (
+      item.name.toLowerCase().includes(query.trim().toLowerCase()) &&
+      (category === "All" || item.category === category) &&
+      (availability === "All" ||
+        (availability === "Available" && remaining > 0) ||
+        (availability === "Low stock" && remaining > 0 && remaining < 20) ||
+        (availability === "Unavailable" && remaining <= 0))
+    );
+  });
+  const selectedUnits = Object.values(selection).reduce((sum, line) => sum + line.quantity, 0);
   useEffect(() => {
     const previous = document.body.style.overflow;
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -2451,15 +2581,18 @@ function ProductSelectionModal({
       window.removeEventListener("keydown", closeOnEscape);
     };
   }, [onClose]);
-
-  const adjust = (product: Product, delta: number) => {
-    const maximum = Math.max(0, product.stock - (currentSale[product.id] || 0));
+  const adjust = (item: CatalogSaleItem, delta: number) => {
+    const maximum = Math.max(0, item.stock - (currentSale[item.key]?.quantity ?? 0));
     setSelection((current) => {
-      const quantity = Math.max(0, Math.min(maximum, (current[product.id] || 0) + delta));
-      return { ...current, [product.id]: quantity };
+      const quantity = Math.max(0, Math.min(maximum, (current[item.key]?.quantity ?? 0) + delta));
+      if (!quantity) {
+        const next = { ...current };
+        delete next[item.key];
+        return next;
+      }
+      return { ...current, [item.key]: { ...item, quantity } };
     });
   };
-
   return createPortal(
     <div
       className="pos-modal-backdrop fixed inset-0 z-[110] flex items-center justify-center bg-[#0b0d0e]/65 p-3 backdrop-blur-sm sm:p-5"
@@ -2479,7 +2612,7 @@ function ProductSelectionModal({
                 Add products
               </h2>
               <p className="mt-1 text-xs text-[#6f7b74]">
-                Search inventory, choose quantities, then add everything in one step.
+                Select the exact variation and quantity for this transaction.
               </p>
             </div>
             <span className="rounded-full bg-[#e2ecdf] px-3 py-1.5 text-[10px] font-bold text-[#174733]">
@@ -2487,11 +2620,9 @@ function ProductSelectionModal({
             </span>
           </div>
         </header>
-
         <div className="border-b border-[#dfe3dc] bg-white px-4 py-4 sm:px-6">
-          <div className="grid gap-3 md:grid-cols-[minmax(220px,1fr)_190px_auto]">
-            <label className="relative">
-              <span className="sr-only">Search products</span>
+          <div className="filter-toolbar filter-toolbar-three">
+            <label className="filter-search">
               <Search
                 size={16}
                 className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#78867e]"
@@ -2499,44 +2630,40 @@ function ProductSelectionModal({
               <input
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search by product name"
-                className="min-h-11 w-full rounded-lg border border-[#ccd4cb] bg-white pl-10 pr-3 text-xs"
+                placeholder="Search product or variation"
+                aria-label="Search products"
+                className="filter-control pl-10"
               />
             </label>
-            <label>
-              <span className="sr-only">Filter by availability</span>
-              <select
-                value={availability}
-                onChange={(event) => setAvailability(event.target.value)}
-                className="min-h-11 w-full rounded-lg border border-[#ccd4cb] bg-white px-3 text-xs font-semibold text-[#42564b]"
-              >
-                <option>All</option>
-                <option>Available</option>
-                <option>Low stock</option>
-                <option>Unavailable</option>
-              </select>
-            </label>
-            <Button
-              kind="secondary"
-              className="gap-2"
+            <select
+              value={availability}
+              onChange={(event) => setAvailability(event.target.value)}
+              className="filter-control px-3 font-semibold"
+              aria-label="Filter by availability"
+            >
+              <option>All</option>
+              <option>Available</option>
+              <option>Low stock</option>
+              <option>Unavailable</option>
+            </select>
+            <ClearFiltersButton
               onClick={() => {
                 setQuery("");
                 setCategory("All");
                 setAvailability("All");
               }}
-            >
-              <RotateCcw size={14} /> Reset filters
-            </Button>
+              disabled={!query && category === "All" && availability === "All"}
+            />
           </div>
           <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
             {categories.map((item) => (
               <button
                 key={item}
                 onClick={() => setCategory(item)}
-                className={`min-h-10 shrink-0 rounded-full border px-3.5 text-[10px] font-bold transition ${
+                className={`min-h-10 shrink-0 rounded-full border px-3.5 text-[10px] font-bold ${
                   category === item
                     ? "border-[#184d37] bg-[#184d37] text-white"
-                    : "border-[#ccd4cb] bg-white text-[#4c6055] hover:border-[#7f9588]"
+                    : "border-[#ccd4cb] bg-white text-[#4c6055]"
                 }`}
               >
                 {item}
@@ -2544,61 +2671,49 @@ function ProductSelectionModal({
             ))}
           </div>
         </div>
-
         <div className="overflow-y-auto p-4 sm:p-6">
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {shown.map((product) => {
-              const remaining = Math.max(0, product.stock - (currentSale[product.id] || 0));
-              const quantity = selection[product.id] || 0;
+            {shown.map((item) => {
+              const remaining = Math.max(0, item.stock - (currentSale[item.key]?.quantity ?? 0));
+              const quantity = selection[item.key]?.quantity ?? 0;
               return (
                 <article
-                  key={product.id}
-                  className={`rounded-xl border bg-white p-3 transition ${
+                  key={item.key}
+                  className={`rounded-xl border bg-white p-3 ${
                     quantity
                       ? "border-[#59816b] shadow-[0_0_0_2px_rgba(24,77,55,.1)]"
                       : "border-[#dce2da]"
                   }`}
                 >
                   <div className="flex gap-3">
-                    <img
-                      src={product.image}
-                      alt=""
-                      loading="lazy"
-                      decoding="async"
-                      className="size-16 shrink-0 rounded-lg object-cover"
-                    />
+                    <img src={item.image} alt="" className="size-16 rounded-lg object-cover" />
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-xs font-semibold text-[#203f32]">
-                        {product.name}
+                        {item.name}
                       </div>
-                      <div className="mt-1 text-[10px] text-[#6e7b73]">{product.category}</div>
+                      <div className="mt-1 text-[10px] text-[#5f7468]">
+                        {item.variationLabel || item.category}
+                      </div>
                       <div className="mt-1 text-sm font-bold text-[#184d37]">
-                        {peso(product.price)}
+                        {peso(item.price)}
                       </div>
                     </div>
                   </div>
                   <div className="mt-3 flex items-center justify-between gap-3">
                     <AvailabilityBadge stock={remaining} />
-                    <div className="flex min-h-11 items-center overflow-hidden rounded-lg border border-[#cbd3ca] bg-[#f8faf7]">
+                    <div className="flex min-h-11 items-center overflow-hidden rounded-lg border border-[#cbd3ca]">
                       <button
-                        onClick={() => adjust(product, -1)}
+                        onClick={() => adjust(item, -1)}
                         disabled={!quantity}
-                        className="grid size-11 place-items-center text-[#496155] transition hover:bg-[#e8eee8] disabled:opacity-35"
-                        aria-label={`Decrease ${product.name} quantity`}
+                        className="grid size-11 place-items-center disabled:opacity-35"
                       >
                         <Minus size={15} />
                       </button>
-                      <span
-                        className="w-8 text-center text-xs font-bold text-[#263f33]"
-                        aria-live="polite"
-                      >
-                        {quantity}
-                      </span>
+                      <span className="w-8 text-center text-xs font-bold">{quantity}</span>
                       <button
-                        onClick={() => adjust(product, 1)}
+                        onClick={() => adjust(item, 1)}
                         disabled={quantity >= remaining}
-                        className="grid size-11 place-items-center text-[#184d37] transition hover:bg-[#e8eee8] disabled:opacity-35"
-                        aria-label={`Increase ${product.name} quantity`}
+                        className="grid size-11 place-items-center disabled:opacity-35"
                       >
                         <Plus size={15} />
                       </button>
@@ -2608,29 +2723,14 @@ function ProductSelectionModal({
               );
             })}
           </div>
-          {!shown.length && (
-            <div className="grid min-h-52 place-items-center rounded-xl border border-dashed border-[#cbd3ca] text-center">
-              <div>
-                <Package size={24} className="mx-auto text-[#8b968f]" />
-                <p className="mt-3 text-xs font-semibold text-[#53635a]">
-                  No inventory matches these filters.
-                </p>
-              </div>
-            </div>
-          )}
         </div>
-
         <footer className="border-t border-[#dfe3dc] bg-white px-4 py-4 sm:px-6">
-          <div className="ml-auto flex w-full flex-col gap-2 sm:max-w-lg sm:flex-row-reverse">
-            <Button
-              disabled={!selectedUnits}
-              onClick={() => onAdd(selection)}
-              className="w-full sm:flex-1"
-            >
-              Add to transaction · {selectedUnits} {selectedUnits === 1 ? "item" : "items"}
+          <div className="responsive-cta-group">
+            <Button disabled={!selectedUnits} onClick={() => onAdd(selection)}>
+              Add to transaction · {selectedUnits}
             </Button>
-            <Button kind="secondary" onClick={onClose} className="w-full gap-2 sm:flex-1">
-              <X size={15} /> Close
+            <Button kind="secondary" onClick={onClose}>
+              Close
             </Button>
           </div>
         </footer>
@@ -2642,7 +2742,7 @@ function ProductSelectionModal({
 
 function PosTerminal() {
   const { products, refreshProducts } = useProductStore();
-  const [sale, setSale] = useState<Record<number, number>>({});
+  const [sale, setSale] = useState<Sale>({});
   const [catalogOpen, setCatalogOpen] = useState(false);
   const [result, setResult] = useState<{
     transaction: { id: string; total: number };
@@ -2651,26 +2751,30 @@ function PosTerminal() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [confirmation, setConfirmation] = useState<ConfirmationConfig | null>(null);
-  const total = products.reduce((s, p) => s + (sale[p.id] || 0) * p.price, 0);
-  const saleLines = products.filter((product) => sale[product.id] > 0);
-  const itemCount = saleLines.reduce((sum, product) => sum + sale[product.id], 0);
-  const changeQuantity = (product: Product, delta: number) => {
+  const saleLines = Object.entries(sale);
+  const total = saleLines.reduce((sum, [, line]) => sum + line.price * line.quantity, 0);
+  const itemCount = saleLines.reduce((sum, [, line]) => sum + line.quantity, 0);
+  const changeQuantity = (key: string, delta: number) => {
     setSale((current) => {
-      const quantity = Math.max(0, Math.min(product.stock, (current[product.id] || 0) + delta));
-      return { ...current, [product.id]: quantity };
+      const line = current[key];
+      const quantity = Math.max(0, Math.min(line.stock, line.quantity + delta));
+      if (!quantity) {
+        const next = { ...current };
+        delete next[key];
+        return next;
+      }
+      return { ...current, [key]: { ...line, quantity } };
     });
   };
-  const addSelection = (selection: Record<number, number>) => {
+  const addSelection = (selection: Sale) => {
     setSale((current) => {
       const next = { ...current };
-      products.forEach((product) => {
-        if (selection[product.id]) {
-          next[product.id] = Math.min(
-            product.stock,
-            (current[product.id] || 0) + selection[product.id],
-          );
-        }
-      });
+      for (const [key, line] of Object.entries(selection)) {
+        next[key] = {
+          ...line,
+          quantity: Math.min(line.stock, (current[key]?.quantity ?? 0) + line.quantity),
+        };
+      }
       return next;
     });
     setCatalogOpen(false);
@@ -2680,9 +2784,11 @@ function PosTerminal() {
     setError("");
     try {
       const completed = await completeWalkInSale(
-        Object.entries(sale)
-          .filter(([, quantity]) => quantity > 0)
-          .map(([productId, quantity]) => ({ productId: Number(productId), quantity })),
+        saleLines.map(([, line]) => ({
+          productId: line.productId,
+          variationId: line.variationId,
+          quantity: line.quantity,
+        })),
       );
       setResult(completed);
       await refreshProducts();
@@ -2752,55 +2858,64 @@ function PosTerminal() {
 
           <div className="flex-1 overflow-y-auto">
             {saleLines.length ? (
-              saleLines.map((product, index) => (
+              saleLines.map(([key, line], index) => (
                 <div
-                  key={product.id}
+                  key={key}
                   className={`grid gap-4 p-4 sm:grid-cols-[auto_minmax(0,1fr)_auto_auto] sm:items-center sm:p-5 ${
                     index ? "border-t border-[#e7eae5]" : ""
                   }`}
                 >
                   <img
-                    src={product.image}
+                    src={line.image}
                     alt=""
                     loading="lazy"
                     decoding="async"
                     className="size-14 rounded-lg object-cover sm:size-16"
                   />
                   <div className="min-w-0">
-                    <div className="truncate text-sm font-semibold text-[#234437]">
-                      {product.name}
-                    </div>
+                    <div className="truncate text-sm font-semibold text-[#234437]">{line.name}</div>
+                    {line.variationLabel && (
+                      <div className="mt-1 text-[10px] font-semibold text-[#607068]">
+                        {line.variationLabel}
+                      </div>
+                    )}
                     <div className="mt-1 flex flex-wrap items-center gap-2">
                       <span className="text-xs font-bold text-[#184d37]">
-                        {peso(product.price)} each
+                        {peso(line.price)} each
                       </span>
-                      <AvailabilityBadge stock={product.stock - sale[product.id]} />
+                      <AvailabilityBadge stock={line.stock - line.quantity} />
                     </div>
                   </div>
                   <div className="flex min-h-11 w-fit items-center overflow-hidden rounded-lg border border-[#ccd4cb]">
                     <button
-                      onClick={() => changeQuantity(product, -1)}
+                      onClick={() => changeQuantity(key, -1)}
                       className="grid size-11 place-items-center text-[#4d6256] hover:bg-[#edf2ed]"
-                      aria-label={`Decrease ${product.name} quantity`}
+                      aria-label={`Decrease ${line.name} quantity`}
                     >
                       <Minus size={15} />
                     </button>
-                    <span className="w-9 text-center text-xs font-bold">{sale[product.id]}</span>
+                    <span className="w-9 text-center text-xs font-bold">{line.quantity}</span>
                     <button
-                      onClick={() => changeQuantity(product, 1)}
-                      disabled={sale[product.id] >= product.stock}
+                      onClick={() => changeQuantity(key, 1)}
+                      disabled={line.quantity >= line.stock}
                       className="grid size-11 place-items-center text-[#184d37] hover:bg-[#edf2ed] disabled:opacity-35"
-                      aria-label={`Increase ${product.name} quantity`}
+                      aria-label={`Increase ${line.name} quantity`}
                     >
                       <Plus size={15} />
                     </button>
                   </div>
                   <div className="flex items-center justify-between gap-3 sm:block sm:text-right">
                     <div className="text-sm font-bold text-[#203f32]">
-                      {peso(product.price * sale[product.id])}
+                      {peso(line.price * line.quantity)}
                     </div>
                     <button
-                      onClick={() => setSale((current) => ({ ...current, [product.id]: 0 }))}
+                      onClick={() =>
+                        setSale((current) => {
+                          const next = { ...current };
+                          delete next[key];
+                          return next;
+                        })
+                      }
                       className="danger-button mt-1 inline-flex min-h-10 items-center gap-1.5 rounded-lg px-2 text-[10px] font-bold"
                     >
                       <Trash2 size={13} /> Remove
@@ -3041,8 +3156,8 @@ function OrderManagementPage() {
           {error}
         </div>
       )}
-      <div className="mb-5 grid gap-2 rounded-xl border border-[#dce1d7] bg-white p-4 sm:grid-cols-2 xl:grid-cols-[minmax(240px,1fr)_210px_180px_auto]">
-        <label className="relative">
+      <div className="filter-toolbar mb-5">
+        <label className="filter-search">
           <span className="sr-only">Search online orders</span>
           <Search
             size={15}
@@ -3052,7 +3167,17 @@ function OrderManagementPage() {
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search order, student, email, or item"
-            className="min-h-11 w-full rounded-lg border border-[#d8ddd4] pl-9 pr-3 text-xs"
+            className="filter-control pl-9"
+          />
+        </label>
+        <label>
+          <span className="sr-only">Filter online orders by date</span>
+          <input
+            type="date"
+            value={dateFilter}
+            onChange={(event) => setDateFilter(event.target.value)}
+            className="filter-control px-3"
+            aria-label="Filter online orders by date"
           />
         </label>
         <label>
@@ -3060,7 +3185,7 @@ function OrderManagementPage() {
           <select
             value={statusFilter}
             onChange={(event) => setStatusFilter(event.target.value)}
-            className="min-h-11 w-full rounded-lg border border-[#d8ddd4] bg-white px-3 text-xs"
+            className="filter-control px-3"
           >
             <option>All</option>
             {[
@@ -3075,28 +3200,14 @@ function OrderManagementPage() {
             ))}
           </select>
         </label>
-        <label>
-          <span className="sr-only">Filter online orders by date</span>
-          <input
-            type="date"
-            value={dateFilter}
-            onChange={(event) => setDateFilter(event.target.value)}
-            className="min-h-11 w-full rounded-lg border border-[#d8ddd4] bg-white px-3 text-xs"
-            aria-label="Filter online orders by date"
-          />
-        </label>
-        <Button
-          kind="secondary"
+        <ClearFiltersButton
           disabled={!query && statusFilter === "All" && !dateFilter}
           onClick={() => {
             setQuery("");
             setStatusFilter("All");
             setDateFilter("");
           }}
-          className="gap-2"
-        >
-          <RotateCcw size={14} /> Clear
-        </Button>
+        />
       </div>
       {showActiveOrders && (
         <>
@@ -3129,7 +3240,12 @@ function OrderManagementPage() {
                 <div className="mt-4 grid gap-4 md:grid-cols-[1fr_220px]">
                   <div>
                     <div className="text-xs text-[#58665e]">
-                      {order.items.map((item) => `${item.quantity}× ${item.name}`).join(" · ")}
+                      {order.items
+                        .map(
+                          (item) =>
+                            `${item.quantity}× ${item.name}${item.size ? ` (Size ${item.size})` : ""}`,
+                        )
+                        .join(" · ")}
                     </div>
                     <div className="mt-2 text-[10px] leading-5 text-[#879087]">
                       {order.statusMessage}
@@ -3394,8 +3510,8 @@ function UserManagementPage({ currentUserId }: { currentUserId: string }) {
           {error}
         </div>
       )}
-      <div className="mb-4 grid gap-2 rounded-xl border border-[#dce1d7] bg-white p-4 sm:grid-cols-[minmax(220px,1fr)_150px_160px_auto]">
-        <label className="relative">
+      <div className="filter-toolbar mb-4">
+        <label className="filter-search">
           <span className="sr-only">Search users</span>
           <Search
             size={15}
@@ -3405,7 +3521,7 @@ function UserManagementPage({ currentUserId }: { currentUserId: string }) {
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search name, email, or ID"
-            className="min-h-11 w-full rounded-lg border border-[#d8ddd4] pl-9 pr-3 text-xs"
+            className="filter-control pl-9"
           />
         </label>
         <label>
@@ -3413,7 +3529,7 @@ function UserManagementPage({ currentUserId }: { currentUserId: string }) {
           <select
             value={roleFilter}
             onChange={(event) => setRoleFilter(event.target.value)}
-            className="min-h-11 w-full rounded-lg border border-[#d8ddd4] bg-white px-3 text-xs"
+            className="filter-control px-3"
           >
             <option>All</option>
             <option value="student">Students</option>
@@ -3426,24 +3542,21 @@ function UserManagementPage({ currentUserId }: { currentUserId: string }) {
           <select
             value={accessFilter}
             onChange={(event) => setAccessFilter(event.target.value)}
-            className="min-h-11 w-full rounded-lg border border-[#d8ddd4] bg-white px-3 text-xs"
+            className="filter-control px-3"
           >
             <option>All</option>
             <option>Active</option>
             <option>Removed</option>
           </select>
         </label>
-        <Button
-          kind="secondary"
+        <ClearFiltersButton
           disabled={!query && roleFilter === "All" && accessFilter === "All"}
           onClick={() => {
             setQuery("");
             setRoleFilter("All");
             setAccessFilter("All");
           }}
-        >
-          Clear
-        </Button>
+        />
       </div>
       <div className="space-y-3 md:hidden">
         {filteredUsers.map((user) => (
@@ -3648,7 +3761,7 @@ function UserManagementPage({ currentUserId }: { currentUserId: string }) {
                 />
               </label>
             </div>
-            <div className="mt-6 grid gap-2 sm:flex sm:flex-row-reverse sm:justify-start">
+            <div className="responsive-cta-group mt-6">
               <Button type="submit" loading={saving} className="w-full gap-2 sm:w-auto">
                 <Save size={14} /> {saving ? "Saving…" : "Save account"}
               </Button>
@@ -3667,8 +3780,460 @@ function UserManagementPage({ currentUserId }: { currentUserId: string }) {
   );
 }
 
+type ProductDraft = {
+  updatedAt?: string;
+  name: string;
+  category: string;
+  price: string;
+  stock: string;
+  description: string;
+  image: string;
+  productType: "simple" | "variable";
+  attributes: ProductAttribute[];
+  variations: ProductVariation[];
+};
+
+function ProductImageField({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState("");
+  const upload = async (file?: File) => {
+    if (!file) return;
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+      setError("Use a JPG, PNG, or WebP image.");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setError("Images must be 5 MB or smaller.");
+      return;
+    }
+    setUploading(true);
+    setError("");
+    try {
+      onChange(await uploadProductImage(file));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "The image could not be uploaded.");
+    } finally {
+      setUploading(false);
+    }
+  };
+  return (
+    <div className="sm:col-span-2">
+      <div className="grid gap-3 sm:grid-cols-[96px_1fr] sm:items-start">
+        <div className="overflow-hidden rounded-xl border border-[#d9ded5] bg-[#eef1eb]">
+          {value ? (
+            <img
+              src={value}
+              alt="Product preview"
+              className="aspect-square size-full object-cover"
+            />
+          ) : (
+            <span className="grid aspect-square place-items-center text-[#7b887f]">
+              <ImagePlus size={24} />
+            </span>
+          )}
+        </div>
+        <div className="space-y-2">
+          <label
+            className="flex min-h-16 cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-[#bfc9bf] bg-[#f8faf7] px-4 text-center transition hover:border-[#789080] hover:bg-[#f1f5f0]"
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={(event) => {
+              event.preventDefault();
+              void upload(event.dataTransfer.files[0]);
+            }}
+          >
+            {uploading ? (
+              <RefreshCw size={19} className="animate-spin text-[#37654f]" />
+            ) : (
+              <ImagePlus size={19} className="text-[#4e735f]" />
+            )}
+            <span className="text-xs font-semibold text-[#3f5c4d]">
+              {uploading ? "Uploading…" : "Upload image"}
+            </span>
+            <input
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              className="sr-only"
+              disabled={uploading}
+              onChange={(event) => void upload(event.target.files?.[0])}
+            />
+          </label>
+          <label className="field">
+            <span className="sr-only">Image URL</span>
+            <input
+              value={value}
+              onChange={(event) => onChange(event.target.value)}
+              placeholder="Or paste an image URL"
+            />
+          </label>
+          {value && (
+            <button
+              type="button"
+              onClick={() => onChange("")}
+              className="min-h-10 rounded-lg px-3 text-xs font-semibold text-[#8a493e] hover:bg-[#f8ebe7]"
+            >
+              Remove image
+            </button>
+          )}
+          {error && <p className="text-xs text-[#8b4333]">{error}</p>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function VariationImageField({
+  value,
+  onChange,
+}: {
+  value: string | null;
+  onChange: (value: string | null) => void;
+}) {
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState("");
+  const upload = async (file?: File) => {
+    if (!file) return;
+    if (
+      !["image/jpeg", "image/png", "image/webp"].includes(file.type) ||
+      file.size > 5 * 1024 * 1024
+    ) {
+      setError("Use a JPG, PNG, or WebP image up to 5 MB.");
+      return;
+    }
+    setUploading(true);
+    setError("");
+    try {
+      onChange(await uploadProductImage(file));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Upload failed.");
+    } finally {
+      setUploading(false);
+    }
+  };
+  return (
+    <div className="min-w-48">
+      <div className="flex items-center gap-2">
+        {value ? (
+          <img src={value} alt="" className="size-10 shrink-0 rounded-md object-cover" />
+        ) : (
+          <span className="grid size-10 shrink-0 place-items-center rounded-md bg-[#edf1eb] text-[#708078]">
+            <ImagePlus size={15} />
+          </span>
+        )}
+        <input
+          value={value ?? ""}
+          onChange={(event) => onChange(event.target.value || null)}
+          placeholder="Uses main image"
+          aria-label="Variation image URL"
+        />
+        <label
+          className="grid size-10 shrink-0 cursor-pointer place-items-center rounded-lg border border-[#c8d2c8] text-[#315b48]"
+          title="Upload variation image"
+        >
+          {uploading ? <RefreshCw size={14} className="animate-spin" /> : <Upload size={14} />}
+          <input
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            className="sr-only"
+            disabled={uploading}
+            onChange={(event) => void upload(event.target.files?.[0])}
+          />
+        </label>
+      </div>
+      {error && <p className="mt-1 text-[9px] text-[#8b4333]">{error}</p>}
+    </div>
+  );
+}
+
+function VariationEditor({
+  attributes,
+  variations,
+  basePrice,
+  onAttributesChange,
+  onVariationsChange,
+}: {
+  attributes: ProductAttribute[];
+  variations: ProductVariation[];
+  basePrice: number;
+  onAttributesChange: (attributes: ProductAttribute[]) => void;
+  onVariationsChange: (variations: ProductVariation[]) => void;
+}) {
+  const [valueDrafts, setValueDrafts] = useState<Record<string, string>>({});
+  const [bulkPrice, setBulkPrice] = useState("");
+  const [bulkStock, setBulkStock] = useState("");
+  const combinations = generateVariationValues(attributes);
+  const generatedKeys = new Set(combinations.map(variationKey));
+  const variationsAreCurrent =
+    combinations.length > 0 &&
+    variations.length === generatedKeys.size &&
+    variations.every((variation) => generatedKeys.has(variation.key));
+  const addAttribute = () =>
+    onAttributesChange([...attributes, { id: crypto.randomUUID(), name: "", values: [] }]);
+  const updateAttribute = (id: string, updates: Partial<ProductAttribute>) =>
+    onAttributesChange(
+      attributes.map((attribute) =>
+        attribute.id === id ? { ...attribute, ...updates } : attribute,
+      ),
+    );
+  const addValue = (attribute: ProductAttribute) => {
+    const value = (valueDrafts[attribute.id] ?? "").trim();
+    if (
+      !value ||
+      attribute.values.some((candidate) => candidate.toLowerCase() === value.toLowerCase())
+    )
+      return;
+    updateAttribute(attribute.id, { values: [...attribute.values, value] });
+    setValueDrafts((current) => ({ ...current, [attribute.id]: "" }));
+  };
+  const generate = () => {
+    onVariationsChange(
+      mergeGeneratedVariations(attributes, variations, {
+        price: Number.isFinite(basePrice) ? basePrice : 0,
+        stock: 0,
+      }),
+    );
+  };
+  const updateVariation = (key: string, updates: Partial<ProductVariation>) =>
+    onVariationsChange(
+      variations.map((variation) =>
+        variation.key === key ? { ...variation, ...updates } : variation,
+      ),
+    );
+  const applyBulk = () => {
+    const price = bulkPrice === "" ? null : Number(bulkPrice);
+    const stock = bulkStock === "" ? null : Number(bulkStock);
+    onVariationsChange(
+      variations.map((variation) => ({
+        ...variation,
+        ...(price !== null && price >= 0 ? { price } : {}),
+        ...(stock !== null && Number.isInteger(stock) && stock >= 0 ? { stock } : {}),
+      })),
+    );
+  };
+  return (
+    <div className="space-y-3">
+      <div className="rounded-xl border border-[#dce2da] bg-[#f8faf7] p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h3 className="text-sm font-semibold text-[#29483a]">Options</h3>
+          <Button kind="secondary" onClick={addAttribute} className="gap-2">
+            <Plus size={14} /> Add option
+          </Button>
+        </div>
+        <div className="mt-4 space-y-3">
+          {attributes.map((attribute, attributeIndex) => (
+            <div key={attribute.id} className="rounded-xl border border-[#dce2da] bg-white p-3">
+              <div className="flex items-center gap-2">
+                <input
+                  value={attribute.name}
+                  onChange={(event) => updateAttribute(attribute.id, { name: event.target.value })}
+                  placeholder={attributeIndex ? "Color or type" : "Option name, e.g. Size"}
+                  className="min-h-11 min-w-0 flex-1 rounded-lg border border-[#d6ddd5] px-3 text-xs"
+                />
+                <button
+                  type="button"
+                  onClick={() =>
+                    onAttributesChange(
+                      attributes.filter((candidate) => candidate.id !== attribute.id),
+                    )
+                  }
+                  className="grid size-11 place-items-center rounded-lg text-[#8a493e] hover:bg-[#f8ebe7]"
+                  aria-label={`Remove ${attribute.name || "attribute"}`}
+                >
+                  <Trash2 size={15} />
+                </button>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {attribute.values.map((value) => (
+                  <span
+                    key={value}
+                    className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-[#ced8ce] bg-[#f2f6f1] pl-3 pr-1.5 text-[10px] font-semibold text-[#40584b]"
+                  >
+                    {value}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateAttribute(attribute.id, {
+                          values: attribute.values.filter((candidate) => candidate !== value),
+                        })
+                      }
+                      className="grid size-7 place-items-center rounded-full hover:bg-[#dfe8df]"
+                      aria-label={`Remove ${value}`}
+                    >
+                      <X size={12} />
+                    </button>
+                  </span>
+                ))}
+              </div>
+              <div className="mt-3 flex gap-2">
+                <input
+                  value={valueDrafts[attribute.id] ?? ""}
+                  onChange={(event) =>
+                    setValueDrafts((current) => ({
+                      ...current,
+                      [attribute.id]: event.target.value,
+                    }))
+                  }
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      addValue(attribute);
+                    }
+                  }}
+                  placeholder="Add value, e.g. Small"
+                  className="min-h-10 min-w-0 flex-1 rounded-lg border border-[#d6ddd5] px-3 text-xs"
+                />
+                <button
+                  type="button"
+                  onClick={() => addValue(attribute)}
+                  className="min-h-10 rounded-lg border border-[#bdc9bf] px-3 text-xs font-semibold text-[#315b48]"
+                >
+                  Add
+                </button>
+              </div>
+            </div>
+          ))}
+          {!attributes.length && (
+            <div className="rounded-lg border border-dashed border-[#cad3ca] px-4 py-8 text-center text-xs text-[#748078]">
+              Add an option such as Size or Color.
+            </div>
+          )}
+        </div>
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-[#e2e7e0] pt-4">
+          <span className="text-xs font-medium text-[#607068]">
+            {combinations.length
+              ? `${combinations.length} variation${combinations.length === 1 ? "" : "s"}`
+              : "Add values to continue"}
+          </span>
+          <Button
+            disabled={!combinations.length || variationsAreCurrent}
+            onClick={generate}
+            className="gap-2"
+          >
+            {variationsAreCurrent ? "Variations ready" : "Update variations"}
+          </Button>
+        </div>
+      </div>
+
+      {variations.length > 0 && (
+        <div className="overflow-hidden rounded-xl border border-[#dce2da] bg-white">
+          <div className="border-b border-[#e2e6df] p-4">
+            <h3 className="text-sm font-semibold text-[#29483a]">Variations</h3>
+            <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={bulkPrice}
+                onChange={(event) => setBulkPrice(event.target.value)}
+                placeholder="Bulk price"
+                aria-label="Set all variation prices"
+                className="min-h-10 rounded-lg border border-[#d6ddd5] px-3 text-xs"
+              />
+              <input
+                type="number"
+                min="0"
+                value={bulkStock}
+                onChange={(event) => setBulkStock(event.target.value)}
+                placeholder="Bulk stock"
+                aria-label="Set all variation stock"
+                className="min-h-10 rounded-lg border border-[#d6ddd5] px-3 text-xs"
+              />
+              <Button kind="secondary" onClick={applyBulk}>
+                Apply to all
+              </Button>
+            </div>
+          </div>
+          <div className="table-wrap max-h-[420px] overflow-y-auto">
+            <table className="variation-table">
+              <thead>
+                <tr>
+                  <th>Variation</th>
+                  <th>SKU</th>
+                  <th>Price</th>
+                  <th>Stock</th>
+                  <th>Image</th>
+                  <th>Active</th>
+                </tr>
+              </thead>
+              <tbody>
+                {variations.map((variation) => (
+                  <tr key={variation.key}>
+                    <td data-label="Variation" className="font-semibold">
+                      {variationLabel(variation.values)}
+                    </td>
+                    <td data-label="SKU">
+                      <input
+                        value={variation.sku}
+                        onChange={(event) =>
+                          updateVariation(variation.key, { sku: event.target.value })
+                        }
+                        placeholder="Optional"
+                      />
+                    </td>
+                    <td data-label="Price">
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={variation.price}
+                        onChange={(event) =>
+                          updateVariation(variation.key, { price: Number(event.target.value) })
+                        }
+                      />
+                    </td>
+                    <td data-label="Stock">
+                      <input
+                        type="number"
+                        min="0"
+                        value={variation.stock}
+                        onChange={(event) =>
+                          updateVariation(variation.key, { stock: Number(event.target.value) })
+                        }
+                      />
+                    </td>
+                    <td data-label="Image">
+                      <VariationImageField
+                        value={variation.image}
+                        onChange={(image) => updateVariation(variation.key, { image })}
+                      />
+                    </td>
+                    <td data-label="Active">
+                      <input
+                        type="checkbox"
+                        checked={variation.active}
+                        onChange={(event) =>
+                          updateVariation(variation.key, { active: event.target.checked })
+                        }
+                        className="size-4 accent-[#184d37]"
+                        aria-label={`Toggle ${variationLabel(variation.values)}`}
+                      />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ManagementPage({ page }: { page: string }) {
-  const { products, addProduct, editProduct, removeProduct } = useProductStore();
+  const {
+    products,
+    loading,
+    error: productLoadError,
+    addProduct,
+    editProduct,
+    removeProduct,
+    refreshProducts,
+  } = useProductStore();
   const isProduct = page === "Product management";
   const isInventory = page === "Inventory management";
   const [feedback, setFeedback] = useState<{ message: string; tone: FeedbackTone } | null>(null);
@@ -3678,13 +4243,16 @@ function ManagementPage({ page }: { page: string }) {
   const [query, setQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("All");
   const [stockFilter, setStockFilter] = useState("All");
-  const [draft, setDraft] = useState({
+  const [draft, setDraft] = useState<ProductDraft>({
     name: "",
     category: "School Supplies",
     price: "0",
     stock: "0",
     description: "",
     image: "/assets/stationery.jpg",
+    productType: "simple",
+    attributes: [],
+    variations: [],
   });
   const title = page;
   const filteredManagementItems = products.filter((item) => {
@@ -3709,20 +4277,33 @@ function ManagementPage({ page }: { page: string }) {
     setDraft(
       product
         ? {
+            updatedAt: product.updatedAt,
             name: product.name,
             category: product.category,
             price: String(product.price),
             stock: String(product.stock),
             description: product.description,
             image: product.image,
+            productType:
+              product.productType === "variable" || product.variations?.length
+                ? "variable"
+                : "simple",
+            attributes:
+              product.attributes ??
+              (product.sizes?.length ? [{ id: "size", name: "Size", values: product.sizes }] : []),
+            variations: product.variations ?? [],
           }
         : {
+            updatedAt: undefined,
             name: "",
             category: "School Supplies",
             price: "0",
             stock: "0",
             description: "",
             image: "/assets/stationery.jpg",
+            productType: "simple",
+            attributes: [],
+            variations: [],
           },
     );
   };
@@ -3730,11 +4311,45 @@ function ManagementPage({ page }: { page: string }) {
     event.preventDefault();
     setSaving(true);
     try {
+      if (!draft.name.trim() || !draft.category.trim()) {
+        throw new Error("Enter a product name and category.");
+      }
+      if (
+        !Number.isFinite(Number(draft.price)) ||
+        Number(draft.price) < 0 ||
+        (draft.productType === "simple" &&
+          (!Number.isInteger(Number(draft.stock)) || Number(draft.stock) < 0))
+      ) {
+        throw new Error("Enter a valid price and stock quantity.");
+      }
       const input = {
-        ...draft,
+        updatedAt: draft.updatedAt,
+        name: draft.name.trim(),
+        category: draft.category.trim(),
+        description: draft.description.trim(),
+        image: draft.image,
+        productType: draft.productType,
+        attributes: draft.productType === "variable" ? draft.attributes : [],
+        variations: draft.productType === "variable" ? draft.variations : [],
         price: Number(draft.price),
         stock: Number(draft.stock),
+        sizes: [],
       };
+      if (
+        draft.productType === "variable" &&
+        (!draft.attributes.length || !draft.variations.length)
+      ) {
+        throw new Error("Add options and update the variations before saving.");
+      }
+      if (draft.productType === "variable") {
+        const expectedKeys = new Set(generateVariationValues(draft.attributes).map(variationKey));
+        if (
+          expectedKeys.size !== draft.variations.length ||
+          draft.variations.some((variation) => !expectedKeys.has(variation.key))
+        ) {
+          throw new Error("Your options changed. Select Update variations before saving.");
+        }
+      }
       if (editing === "new") await addProduct(input);
       else if (editing) await editProduct(editing.id, input);
       setEditing(null);
@@ -3779,6 +4394,18 @@ function ManagementPage({ page }: { page: string }) {
           isProduct ? <Button onClick={() => openProductForm()}>Add product</Button> : undefined
         }
       />
+      {productLoadError && (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#e4c9c1] bg-[#fff7f4] px-4 py-3">
+          <p className="text-xs text-[#7d4338]">{productLoadError}</p>
+          <Button
+            kind="secondary"
+            loading={loading}
+            onClick={() => void refreshProducts().catch(() => undefined)}
+          >
+            Retry
+          </Button>
+        </div>
+      )}
       {editing && (
         <div
           className="fixed inset-0 z-50 grid place-items-center bg-[#0b0d0e]/60 p-4 backdrop-blur-sm"
@@ -3787,16 +4414,13 @@ function ManagementPage({ page }: { page: string }) {
           <form
             onSubmit={saveProduct}
             onMouseDown={(event) => event.stopPropagation()}
-            className="max-h-[calc(100dvh-2rem)] w-full max-w-xl overflow-y-auto rounded-xl bg-white p-6 shadow-2xl"
+            className="max-h-[calc(100dvh-2rem)] w-full max-w-4xl overflow-y-auto rounded-2xl bg-[#f8faf7] shadow-2xl"
           >
-            <div className="flex items-center justify-between">
+            <div className="sticky top-0 z-10 flex items-center justify-between border-b border-[#dde3dc] bg-white px-5 py-4 sm:px-6">
               <div>
                 <h2 className="text-lg font-semibold text-[#173d2f]">
                   {editing === "new" ? "Add product" : "Edit product"}
                 </h2>
-                <p className="mt-1 text-[10px] text-[#818a82]">
-                  Changes are saved to the Business Center database.
-                </p>
               </div>
               <button
                 type="button"
@@ -3807,83 +4431,122 @@ function ManagementPage({ page }: { page: string }) {
                 <X size={17} />
               </button>
             </div>
-            <div className="mt-5 grid gap-4 sm:grid-cols-2">
-              <label className="field sm:col-span-2">
-                Product name
-                <input
-                  value={draft.name}
-                  onChange={(event) => setDraft({ ...draft, name: event.target.value })}
-                  required
-                />
-              </label>
-              <label className="field">
-                Category
-                <input
-                  list="product-category-suggestions"
-                  value={draft.category}
-                  onChange={(event) => setDraft({ ...draft, category: event.target.value })}
-                  placeholder="Type a category"
-                  required
-                />
-                <datalist id="product-category-suggestions">
-                  <option value="Uniforms" />
-                  <option value="PE & Athletics" />
-                  <option value="Identification" />
-                  <option value="Assessment Supplies" />
-                  <option value="School Supplies" />
-                  <option value="Services" />
-                </datalist>
-              </label>
-              <label className="field">
-                Image path or URL
-                <input
-                  list="product-image-suggestions"
-                  value={draft.image}
-                  onChange={(event) => setDraft({ ...draft, image: event.target.value })}
-                  placeholder="/assets/image.jpg or https://…"
-                  required
-                />
-                <datalist id="product-image-suggestions">
-                  <option value="/assets/stationery.jpg" />
-                  <option value="/assets/spiral-notebook.jpg" />
-                  <option value="/assets/notebook-pen.jpg" />
-                </datalist>
-              </label>
-              <label className="field">
-                Price
-                <input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={draft.price}
-                  onChange={(event) => setDraft({ ...draft, price: event.target.value })}
-                  required
-                />
-              </label>
-              <label className="field">
-                Stock
-                <input
-                  type="number"
-                  min="0"
-                  value={draft.stock}
-                  onChange={(event) => setDraft({ ...draft, stock: event.target.value })}
-                  required
-                />
-              </label>
-              <label className="field sm:col-span-2">
-                Description
-                <textarea
-                  rows={3}
-                  value={draft.description}
-                  onChange={(event) => setDraft({ ...draft, description: event.target.value })}
-                  required
-                />
-              </label>
+            <div className="space-y-4 p-4 sm:p-6">
+              <section className="rounded-xl border border-[#dce2da] bg-white p-4 sm:p-5">
+                <h3 className="text-sm font-semibold text-[#29483a]">Product details</h3>
+                <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                  <label className="field">
+                    Product name
+                    <input
+                      value={draft.name}
+                      onChange={(event) => setDraft({ ...draft, name: event.target.value })}
+                      required
+                    />
+                  </label>
+                  <label className="field">
+                    Category
+                    <input
+                      list="product-category-suggestions"
+                      value={draft.category}
+                      onChange={(event) => setDraft({ ...draft, category: event.target.value })}
+                      placeholder="Type a category"
+                      required
+                    />
+                    <datalist id="product-category-suggestions">
+                      <option value="Uniforms" />
+                      <option value="PE & Athletics" />
+                      <option value="Identification" />
+                      <option value="Assessment Supplies" />
+                      <option value="School Supplies" />
+                      <option value="Services" />
+                    </datalist>
+                  </label>
+                  <label className="field sm:col-span-2">
+                    Description
+                    <textarea
+                      rows={3}
+                      value={draft.description}
+                      onChange={(event) => setDraft({ ...draft, description: event.target.value })}
+                    />
+                  </label>
+                  <ProductImageField
+                    value={draft.image}
+                    onChange={(image) => setDraft({ ...draft, image })}
+                  />
+                </div>
+              </section>
+
+              <section className="rounded-xl border border-[#dce2da] bg-white p-4 sm:p-5">
+                <h3 className="text-sm font-semibold text-[#29483a]">Pricing and stock</h3>
+                <div className="mt-4 grid grid-cols-2 gap-2 rounded-xl bg-[#f1f4ef] p-1">
+                  {(
+                    [
+                      ["simple", "Simple"],
+                      ["variable", "With options"],
+                    ] as const
+                  ).map(([value, title]) => (
+                    <label
+                      key={value}
+                      className={`cursor-pointer rounded-lg px-3 py-2.5 text-center ${
+                        draft.productType === value
+                          ? "bg-white text-[#184d37] shadow-sm"
+                          : "text-[#68776f]"
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="productType"
+                        value={value}
+                        checked={draft.productType === value}
+                        onChange={() => setDraft({ ...draft, productType: value })}
+                        className="sr-only"
+                      />
+                      <span className="text-xs font-semibold">{title}</span>
+                    </label>
+                  ))}
+                </div>
+                <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                  <label
+                    className={`field ${draft.productType === "variable" ? "sm:col-span-2" : ""}`}
+                  >
+                    {draft.productType === "simple" ? "Price" : "Starting price"}
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={draft.price}
+                      onChange={(event) => setDraft({ ...draft, price: event.target.value })}
+                      required
+                    />
+                  </label>
+                  {draft.productType === "simple" && (
+                    <label className="field">
+                      Stock
+                      <input
+                        type="number"
+                        min="0"
+                        value={draft.stock}
+                        onChange={(event) => setDraft({ ...draft, stock: event.target.value })}
+                        required
+                      />
+                    </label>
+                  )}
+                </div>
+              </section>
+
+              {draft.productType === "variable" && (
+                <section className="rounded-xl border border-[#dce2da] bg-white p-4 sm:p-5">
+                  <VariationEditor
+                    attributes={draft.attributes}
+                    variations={draft.variations}
+                    basePrice={Number(draft.price)}
+                    onAttributesChange={(attributes) => setDraft({ ...draft, attributes })}
+                    onVariationsChange={(variations) => setDraft({ ...draft, variations })}
+                  />
+                </section>
+              )}
             </div>
-            <div className="mt-6 grid gap-2 sm:flex sm:flex-row-reverse sm:justify-start">
-              <Button type="submit" loading={saving} className="w-full sm:w-auto">
-                {saving ? "Saving…" : "Save product"}
-              </Button>
+            <div className="sticky bottom-0 z-10 flex flex-col-reverse gap-2 border-t border-[#dde3dc] bg-white px-5 py-4 sm:flex-row sm:justify-end sm:px-6">
               <Button
                 kind="secondary"
                 onClick={() => setEditing(null)}
@@ -3891,22 +4554,37 @@ function ManagementPage({ page }: { page: string }) {
               >
                 Cancel
               </Button>
+              <Button type="submit" loading={saving} className="w-full sm:w-auto">
+                {saving ? "Saving…" : "Save product"}
+              </Button>
             </div>
           </form>
         </div>
       )}
       <div className="overflow-hidden rounded-lg border border-[#dce1d7] bg-white">
-        <div className="flex flex-wrap gap-2 border-b border-[#e1e5dd] p-4">
-          <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search products"
-            className="min-h-11 w-full max-w-[360px] rounded-lg border border-[#d8ddd4] px-3 text-xs outline-none"
-          />
+        <div
+          className={`filter-toolbar filter-toolbar-embedded ${
+            isInventory ? "" : "filter-toolbar-three"
+          }`}
+        >
+          <label className="filter-search">
+            <span className="sr-only">Search products</span>
+            <Search
+              size={15}
+              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#7c8981]"
+            />
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search products"
+              className="filter-control pl-9"
+            />
+          </label>
           <select
             value={categoryFilter}
             onChange={(event) => setCategoryFilter(event.target.value)}
-            className="min-h-11 rounded-lg border border-[#d8ddd4] bg-white px-3 text-xs"
+            className="filter-control px-3"
+            aria-label="Filter products by category"
           >
             <option value="All">All categories</option>
             {managementCategories.map((category) => (
@@ -3917,7 +4595,7 @@ function ManagementPage({ page }: { page: string }) {
             <select
               value={stockFilter}
               onChange={(event) => setStockFilter(event.target.value)}
-              className="min-h-11 rounded-lg border border-[#d8ddd4] bg-white px-3 text-xs"
+              className="filter-control px-3"
               aria-label="Filter products by stock level"
             >
               <option>All</option>
@@ -3926,17 +4604,14 @@ function ManagementPage({ page }: { page: string }) {
               <option>Out of stock</option>
             </select>
           )}
-          <Button
-            kind="secondary"
+          <ClearFiltersButton
             disabled={!query && categoryFilter === "All" && stockFilter === "All"}
             onClick={() => {
               setQuery("");
               setCategoryFilter("All");
               setStockFilter("All");
             }}
-          >
-            Clear filters
-          </Button>
+          />
         </div>
         <div className="table-wrap max-h-[480px] overflow-y-auto">
           <table>
@@ -3944,59 +4619,82 @@ function ManagementPage({ page }: { page: string }) {
               <tr>
                 <th>Product</th>
                 <th>Category</th>
-                <th>{isInventory ? "On hand" : "Price"}</th>
+                <th>Type</th>
+                <th>Price</th>
+                <th>On hand</th>
                 <th>Status</th>
                 <th>Updated</th>
                 <th />
               </tr>
             </thead>
             <tbody>
-              {filteredManagementItems.map((item) => (
-                <tr key={item.id}>
-                  <td data-label="Product" className="font-semibold">
-                    {item.name}
-                  </td>
-                  <td data-label="Category">{item.category}</td>
-                  <td data-label={isInventory ? "On hand" : "Price"}>
-                    {isInventory ? `${item.stock} units` : peso(item.price)}
-                  </td>
-                  <td data-label="Status">
-                    <Pill tone={item.stock <= 0 ? "gray" : item.stock < 20 ? "amber" : "green"}>
-                      {item.stock <= 0 ? "Out of stock" : item.stock < 20 ? "Low stock" : "Active"}
-                    </Pill>
-                  </td>
-                  <td data-label="Updated">Current</td>
-                  <td data-label="Actions">
-                    <div className="flex gap-3">
-                      <button
-                        onClick={() => openProductForm(item)}
-                        className="min-h-11 rounded-lg px-3 font-semibold text-[#184d37] hover:bg-[#edf2eb]"
-                      >
-                        Manage
-                      </button>
-                      {isProduct && (
-                        <button
-                          onClick={() =>
-                            setConfirmation({
-                              title: "Remove this product?",
-                              message: `${item.name} will be removed from active inventory and will no longer be available for ordering.`,
-                              confirmLabel: "Remove product",
-                              destructive: true,
-                              onConfirm: () => deleteProduct(item),
-                            })
-                          }
-                          className="danger-button min-h-11 rounded-lg px-3 font-semibold"
-                        >
-                          Delete
-                        </button>
+              {filteredManagementItems.map((item) => {
+                const activeVariations = (item.variations ?? []).filter(
+                  (variation) => variation.active,
+                );
+                const prices = activeVariations.map((variation) => variation.price);
+                const priceRange = prices.length
+                  ? `${peso(Math.min(...prices))}${Math.min(...prices) === Math.max(...prices) ? "" : ` – ${peso(Math.max(...prices))}`}`
+                  : peso(item.price);
+                return (
+                  <tr key={item.id}>
+                    <td data-label="Product" className="font-semibold">
+                      {item.name}
+                      {item.productType === "variable" && (
+                        <span className="mt-1 block text-[10px] font-normal text-[#748078]">
+                          {activeVariations.length} active variation
+                          {activeVariations.length === 1 ? "" : "s"}
+                        </span>
                       )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                    </td>
+                    <td data-label="Category">{item.category}</td>
+                    <td data-label="Type" className="capitalize">
+                      {item.productType ?? "simple"}
+                    </td>
+                    <td data-label="Price">{priceRange}</td>
+                    <td data-label="On hand">{item.stock} units</td>
+                    <td data-label="Status">
+                      <Pill tone={item.stock <= 0 ? "gray" : item.stock < 20 ? "amber" : "green"}>
+                        {item.stock <= 0
+                          ? "Out of stock"
+                          : item.stock < 20
+                            ? "Low stock"
+                            : "Active"}
+                      </Pill>
+                    </td>
+                    <td data-label="Updated">Current</td>
+                    <td data-label="Actions">
+                      <div className="flex gap-3">
+                        <button
+                          onClick={() => openProductForm(item)}
+                          className="min-h-11 rounded-lg px-3 font-semibold text-[#184d37] hover:bg-[#edf2eb]"
+                        >
+                          Manage
+                        </button>
+                        {isProduct && (
+                          <button
+                            onClick={() =>
+                              setConfirmation({
+                                title: "Remove this product?",
+                                message: `${item.name} will be removed from active inventory and will no longer be available for ordering.`,
+                                confirmLabel: "Remove product",
+                                destructive: true,
+                                onConfirm: () => deleteProduct(item),
+                              })
+                            }
+                            className="danger-button min-h-11 rounded-lg px-3 font-semibold"
+                          >
+                            Delete
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
               {!filteredManagementItems.length && (
                 <tr>
-                  <td colSpan={6} className="py-12 text-center text-xs text-[#69766e]">
+                  <td colSpan={8} className="py-12 text-center text-xs text-[#69766e]">
                     No records match your search and filters.
                   </td>
                 </tr>
@@ -4098,13 +4796,17 @@ export default function App() {
   const [sessionChecking, setSessionChecking] = useState(Boolean(storedSession));
   const [page, setPage] = useState("Home");
   const [pageHistory, setPageHistory] = useState<string[]>([]);
-  const [cart, setCart] = useState<Record<number, number>>({});
+  const [cart, setCart] = useState<Cart>({});
   const [selected, setSelected] = useState<Product | null>(null);
   const [selectedQuantity, setSelectedQuantity] = useState(1);
+  const [selectedOptions, setSelectedOptions] = useState<Record<string, string>>({});
   const [lastPlacedOrder, setLastPlacedOrder] = useState<OnlineOrder | null>(null);
   const [toast, setToast] = useState("");
   const mainRef = useRef<HTMLElement>(null);
-  const cartCount = useMemo(() => Object.values(cart).reduce((a, b) => a + b, 0), [cart]);
+  const cartCount = useMemo(
+    () => Object.values(cart).reduce((sum, line) => sum + line.quantity, 0),
+    [cart],
+  );
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     window.localStorage.setItem("plmun-theme", theme);
@@ -4172,14 +4874,42 @@ export default function App() {
     mainRef.current?.scrollTo({ top: 0, behavior: "smooth" });
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
-  const add = (p: Product, quantity = 1) => {
-    setCart((c) => ({ ...c, [p.id]: (c[p.id] || 0) + quantity }));
-    setToast(`${quantity}× ${p.name} added to cart`);
+  const add = (p: Product, quantity = 1, variation: ProductVariation | null = null) => {
+    const key = `${p.id}:${variation?.id ?? "standard"}`;
+    setCart((current) => ({
+      ...current,
+      [key]: {
+        productId: p.id,
+        variationId: variation?.id ?? null,
+        variationValues: variation?.values ?? {},
+        variationLabel: variation ? variationLabel(variation.values) : null,
+        unitPrice: variation?.price ?? p.price,
+        quantity: (current[key]?.quantity ?? 0) + quantity,
+      },
+    }));
+    setToast(
+      `${quantity}× ${p.name}${variation ? ` · ${variationLabel(variation.values)}` : ""} added to cart`,
+    );
   };
   const openProduct = (product: Product) => {
     setSelectedQuantity(1);
+    setSelectedOptions(
+      Object.fromEntries(
+        (product.attributes ?? []).map((attribute) => [attribute.name, attribute.values[0] ?? ""]),
+      ),
+    );
     setSelected(product);
   };
+  const selectedVariation =
+    selected?.productType === "variable"
+      ? ((selected.variations ?? []).find(
+          (variation) => variation.key === variationKey(selectedOptions) && variation.active,
+        ) ?? null)
+      : null;
+  const selectedPrice = selectedVariation?.price ?? selected?.price ?? 0;
+  const selectedStock =
+    selected?.productType === "variable" ? (selectedVariation?.stock ?? 0) : (selected?.stock ?? 0);
+  const selectedImage = selectedVariation?.image || selected?.image || "";
   if (sessionChecking) {
     return (
       <main
@@ -4337,7 +5067,7 @@ export default function App() {
               onMouseDown={(e) => e.stopPropagation()}
             >
               <img
-                src={selected.image}
+                src={selectedImage}
                 alt={selected.name}
                 decoding="async"
                 className="h-48 w-full object-cover md:h-full md:min-h-64"
@@ -4352,10 +5082,50 @@ export default function App() {
                 >
                   {selected.name}
                 </h2>
-                <div className="mt-2 text-lg font-bold text-[#184d37]">{peso(selected.price)}</div>
+                <div className="mt-2 text-lg font-bold text-[#184d37]">{peso(selectedPrice)}</div>
                 <p className="mt-5 text-sm leading-6 text-[#6e7971]">{selected.description}</p>
+                {selected.productType === "variable" && (
+                  <div className="mt-5 space-y-4">
+                    {(selected.attributes ?? []).map((attribute) => (
+                      <fieldset key={attribute.id}>
+                        <legend className="text-xs font-semibold text-[#40564b]">
+                          Select {attribute.name}
+                        </legend>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {attribute.values.map((value) => {
+                            const candidate = { ...selectedOptions, [attribute.name]: value };
+                            const available = isOptionValueAvailable(
+                              selected.variations ?? [],
+                              selectedOptions,
+                              attribute.name,
+                              value,
+                            );
+                            return (
+                              <button
+                                key={value}
+                                type="button"
+                                disabled={!available}
+                                onClick={() => {
+                                  setSelectedOptions(candidate);
+                                  setSelectedQuantity(1);
+                                }}
+                                className={`min-h-10 rounded-lg border px-3 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-35 ${
+                                  selectedOptions[attribute.name] === value
+                                    ? "border-[#184d37] bg-[#184d37] text-white"
+                                    : "border-[#cdd6ce] bg-white text-[#476053] hover:border-[#789080]"
+                                }`}
+                              >
+                                {value}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </fieldset>
+                    ))}
+                  </div>
+                )}
                 <div className="mt-5 flex items-center justify-between gap-3 rounded-lg border border-[#dce2da] bg-[#f2f4ed] p-3">
-                  <AvailabilityBadge stock={selected.stock} />
+                  <AvailabilityBadge stock={selectedStock} />
                   <span className="text-[10px] font-semibold text-[#607068]">Campus pickup</span>
                 </div>
                 <div className="mt-4 rounded-xl border border-[#dce2da] bg-[#f8faf7] p-4">
@@ -4364,7 +5134,7 @@ export default function App() {
                       <div className="text-[10px] font-bold uppercase tracking-[.1em] text-[#718078]">
                         Quantity
                       </div>
-                      <div className="mt-1 text-xs text-[#627168]">{peso(selected.price)} each</div>
+                      <div className="mt-1 text-xs text-[#627168]">{peso(selectedPrice)} each</div>
                     </div>
                     <div className="flex min-h-11 items-center overflow-hidden rounded-lg border border-[#cbd3ca] bg-white">
                       <button
@@ -4382,9 +5152,9 @@ export default function App() {
                       <button
                         type="button"
                         onClick={() =>
-                          setSelectedQuantity((quantity) => Math.min(selected.stock, quantity + 1))
+                          setSelectedQuantity((quantity) => Math.min(selectedStock, quantity + 1))
                         }
-                        disabled={selectedQuantity >= selected.stock}
+                        disabled={selectedQuantity >= selectedStock}
                         className="grid size-11 place-items-center text-[#184d37] hover:bg-[#edf2ed] disabled:opacity-35"
                         aria-label={`Increase ${selected.name} quantity`}
                       >
@@ -4394,19 +5164,26 @@ export default function App() {
                   </div>
                   <div className="mt-3 flex items-center justify-between border-t border-[#dde3dc] pt-3 text-sm font-bold text-[#173d2f]">
                     <span>Subtotal</span>
-                    <span>{peso(selected.price * selectedQuantity)}</span>
+                    <span>{peso(selectedPrice * selectedQuantity)}</span>
                   </div>
                 </div>
-                <div className="mt-6 flex flex-col gap-2 sm:flex-row-reverse">
+                <div className="responsive-cta-group mt-6">
                   <Button
-                    disabled={selected.stock <= 0}
+                    disabled={
+                      selectedStock <= 0 ||
+                      (selected.productType === "variable" && !selectedVariation)
+                    }
                     className="w-full sm:flex-1"
                     onClick={() => {
-                      add(selected, selectedQuantity);
+                      add(selected, selectedQuantity, selectedVariation);
                       setSelected(null);
                     }}
                   >
-                    Add {selectedQuantity} to cart · {peso(selected.price * selectedQuantity)}
+                    Add {selectedQuantity}
+                    {selectedVariation
+                      ? ` · ${variationLabel(selectedVariation.values)}`
+                      : ""} ·{" "}
+                    {peso(selectedPrice * selectedQuantity)}
                   </Button>
                   <Button
                     kind="secondary"

@@ -19,6 +19,10 @@ export type OnlineOrder = {
     name: string;
     quantity: number;
     price: number;
+    size: string | null;
+    variationId: number | null;
+    variationLabel: string | null;
+    variationValues: Record<string, string>;
   }>;
   total: number;
   status: OrderStatus;
@@ -35,7 +39,7 @@ export async function getOrders() {
 }
 
 export async function createOnlineOrder(input: {
-  items: Array<{ productId: number; quantity: number }>;
+  items: Array<{ productId: number; quantity: number; variationId?: number | null }>;
   pickupDate: string;
   pickupWindow: string;
   notes: string;
@@ -63,7 +67,9 @@ export async function updateOrderStatus(id: string, status: OrderStatus, message
   return order;
 }
 
-export async function completeWalkInSale(items: Array<{ productId: number; quantity: number }>) {
+export async function completeWalkInSale(
+  items: Array<{ productId: number; variationId?: number | null; quantity: number }>,
+) {
   const result = await apiRequest<{
     transaction: { id: string; total: number };
     impactedOrders: OnlineOrder[];

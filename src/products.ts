@@ -1,14 +1,20 @@
 import { apiRequest } from "./api";
 import { requestNotificationRefresh } from "./notifications";
+import type { ProductAttribute, ProductVariation } from "./variations";
 
 export type Product = {
   id: number;
+  updatedAt?: string;
   name: string;
   category: string;
   price: number;
   stock: number;
   image: string;
   description: string;
+  sizes?: string[];
+  productType?: "simple" | "variable";
+  attributes?: ProductAttribute[];
+  variations?: ProductVariation[];
 };
 
 export const SERVICE_CATEGORY = "Services";
@@ -26,6 +32,7 @@ export const fallbackProducts: Product[] = [
     image: "/assets/stationery.jpg",
     description:
       "Official PLMun blouse or polo and matching pants or skirt for regular school days.",
+    sizes: ["XS", "S", "M", "L", "XL", "2XL"],
   },
   {
     id: 2,
@@ -35,6 +42,7 @@ export const fallbackProducts: Product[] = [
     stock: 28,
     image: "/assets/stationery.jpg",
     description: "Official PE shirt and jogging pants designed for classes and campus activities.",
+    sizes: ["XS", "S", "M", "L", "XL", "2XL"],
   },
   {
     id: 3,
@@ -142,6 +150,21 @@ export async function createProduct(product: Omit<Product, "id">) {
   ).product;
   requestNotificationRefresh();
   return created;
+}
+
+export async function uploadProductImage(file: File) {
+  const body = new FormData();
+  body.append("file", file);
+  return (
+    await apiRequest<{ url: string }>(
+      "/products/image",
+      {
+        method: "POST",
+        body,
+      },
+      true,
+    )
+  ).url;
 }
 
 export async function updateProduct(id: number, updates: Partial<Product>) {

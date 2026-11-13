@@ -21,16 +21,17 @@ export async function apiRequest<T>(
   authenticated = false,
 ): Promise<T> {
   const token = authenticated ? getAccessToken() : null;
+  const headers = new Headers(options.headers);
+  if (!(options.body instanceof FormData) && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+  headers.set("apikey", publicAnonKey);
+  headers.set("Authorization", `Bearer ${token ?? publicAnonKey}`);
   let response: Response;
   try {
     response = await fetch(`${apiUrl}${path}`, {
       ...options,
-      headers: {
-        "Content-Type": "application/json",
-        apikey: publicAnonKey,
-        Authorization: `Bearer ${token ?? publicAnonKey}`,
-        ...options.headers,
-      },
+      headers,
     });
   } catch {
     throw new Error(
