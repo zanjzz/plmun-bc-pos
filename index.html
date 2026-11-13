@@ -1,3 +1,4 @@
+
 <!doctype html>
 <html lang="en">
   <head>
@@ -8,19 +9,108 @@
       name="description"
       content="PLMun Business Center ordering, point-of-sale, and inventory management."
     />
+
+    <!-- Apply saved or system theme before rendering -->
     <script>
-      document.documentElement.dataset.theme =
-        localStorage.getItem("plmun-theme") ||
-        (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+      const savedTheme = localStorage.getItem("plmun-theme");
+      const systemPrefersDark = window.matchMedia(
+        "(prefers-color-scheme: dark)"
+      ).matches;
+
+      const initialTheme =
+        savedTheme || (systemPrefersDark ? "dark" : "light");
+
+      document.documentElement.dataset.theme = initialTheme;
     </script>
+
+    <!-- Theme-aware favicon -->
     <link
       id="app-favicon"
       rel="icon"
       type="image/png"
       href="/assets/plmun-favicon-light-theme.png"
     />
+
+    <script>
+      // Set favicon according to the current theme
+      document.addEventListener("DOMContentLoaded", () => {
+        const updateFavicon = (theme) => {
+          const favicon = document.getElementById("app-favicon");
+
+          if (favicon) {
+            favicon.href =
+              theme === "dark"
+                ? "/assets/plmun-favicon-dark-theme.png"
+                : "/assets/plmun-favicon-light-theme.png";
+          }
+        };
+
+        updateFavicon(document.documentElement.dataset.theme);
+      });
+    </script>
+
     <title>PLMUN - BC</title>
   </head>
+
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#123d2c" />
+    <meta
+      name="description"
+      content="PLMun Business Center ordering, point-of-sale, and inventory management."
+    />
+
+    <!-- Apply saved or system theme before rendering -->
+    <script>
+      const savedTheme = localStorage.getItem("plmun-theme");
+      const systemPrefersDark = window.matchMedia(
+        "(prefers-color-scheme: dark)"
+      ).matches;
+
+      const initialTheme =
+        savedTheme || (systemPrefersDark ? "dark" : "light");
+
+      document.documentElement.dataset.theme = initialTheme;
+    </script>
+
+    <!-- Theme-aware favicon -->
+    <link
+      id="app-favicon"
+      rel="icon"
+      type="image/png"
+      href="/assets/plmun-favicon-light-theme.png"
+    />
+
+    <script>
+      // Set favicon according to the current theme
+      document.addEventListener("DOMContentLoaded", () => {
+        const updateFavicon = (theme) => {
+          const favicon = document.getElementById("app-favicon");
+
+          if (favicon) {
+            favicon.href =
+              theme === "dark"
+                ? "/assets/plmun-favicon-dark-theme.png"
+                : "/assets/plmun-favicon-light-theme.png";
+          }
+        };
+
+        updateFavicon(document.documentElement.dataset.theme);
+      });
+    </script>
+
+    <title>PLMUN - BC</title>
+  </head>
+
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>

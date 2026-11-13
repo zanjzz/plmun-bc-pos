@@ -1,0 +1,35 @@
+{
+  "verdict": "CHANGES_REQUESTED",
+  "findings": [
+    {
+      "id": "variation-stock-ignored-on-update",
+      "severity": "blocker",
+      "title": "Variation stock silently ignored on product updates",
+      "location": "supabase/migrations/20250320000000_separate_inventory_management.sql:49-54",
+      "description": "The sync_product_variations function's ON CONFLICT clause updates price, SKU, attributes, active status, and image, but NOT stock. When editing an existing product with variations, stock changes made in the UI are sent to the backend but silently ignored by the database.",
+      "consequence": "User edits variation stock in the product form, clicks Save, and believes the change succeeded, but the stock value remains unchanged. This is silent data loss.",
+      "evidence": [
+        "Migration lines 49-54: ON CONFLICT UPDATE does not include 'stock = excluded.stock'",
+        "Frontend src/App.tsx:4387-4394: Stock input field is editable",
+        "Frontend src/App.tsx:4576: Stock value is sent to backend",
+        "Backend index.ts:1126: Calls syncProductVariations on edit"
+      ],
+      "correction": "Add 'stock = excluded.stock' to the ON CONFLICT UPDATE clause in the migration, OR disable the stock input fields in the variation editor when editing an existing product (only enable when creating new)."
+    },
+    {
+      "id": "simple-product-stock-ignored-on-update",
+      "severity": "blocker",
+      "title": "Simple product stock ignored on updates",
+      "location": "supabase/functions/server/index.ts:1101-1110",
+      "description": "When updating a simple product, the backend UPDATE query does not include the stock field in the update payload, even though the frontend sends it.",
+      "consequence": "User edits a simple product's 'Initial stock' field, clicks Save, and the stock value is not updated in the database. Silent data loss.",
+      "evidence": [
+        "Backend index.ts:1101-1110: UPDATE query missing stock field",
+        "Frontend src/App.tsx:5099-5111: Stock field shown when editing",
+        "Frontend src/App.tsx:4576: Stock value sent to backend"
+      ],
+      "correction": "Remove the stock field from the edit form for simple products (only show when creating new), OR add 'stock: Number(input.stock ?? 0)' to the backend UPDATE query. First option aligns with design intent per helper text."
+    }
+  ],
+  "reviewDoc": "c:\\Users\\zdllz\\OneDrive\\Documents\\Zanj_codes\\plmun-bc-pos\\.agents\\tasks\\polish-ui-fix-stock\\review.md"
+}

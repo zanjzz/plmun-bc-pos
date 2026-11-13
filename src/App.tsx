@@ -4145,12 +4145,14 @@ function VariationEditor({
   attributes,
   variations,
   basePrice,
+  isCreating,
   onAttributesChange,
   onVariationsChange,
 }: {
   attributes: ProductAttribute[];
   variations: ProductVariation[];
   basePrice: number;
+  isCreating: boolean;
   onAttributesChange: (attributes: ProductAttribute[]) => void;
   onVariationsChange: (variations: ProductVariation[]) => void;
 }) {
@@ -4317,34 +4319,60 @@ function VariationEditor({
         <div className="overflow-hidden rounded-xl border border-[#dce2da] bg-white">
           <div className="border-b border-[#e2e6df] p-4">
             <h3 className="text-sm font-semibold text-[#29483a]">Variations</h3>
-            <p className="mt-1 text-xs text-[#6f7c74]">
-              Set initial stock for variations here, or adjust later in Inventory management.
-            </p>
-            <div className="mt-3 flex gap-2">
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                value={bulkPrice}
-                onChange={(event) => setBulkPrice(event.target.value)}
-                placeholder="Bulk price"
-                aria-label="Set all variation prices"
-                className="min-h-10 min-w-0 flex-1 rounded-lg border border-[#d6ddd5] px-3 text-xs"
-              />
-              <input
-                type="number"
-                min="0"
-                step="1"
-                value={bulkStock}
-                onChange={(event) => setBulkStock(event.target.value)}
-                placeholder="Bulk stock"
-                aria-label="Set all variation stock"
-                className="min-h-10 min-w-0 flex-1 rounded-lg border border-[#d6ddd5] px-3 text-xs"
-              />
-              <Button kind="secondary" onClick={applyBulk}>
-                Apply to all
-              </Button>
-            </div>
+            {isCreating && (
+              <>
+                <p className="mt-1 text-xs text-[#6f7c74]">
+                  Set initial stock for variations here, or adjust later in Inventory management.
+                </p>
+                <div className="mt-3 flex gap-2">
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={bulkPrice}
+                    onChange={(event) => setBulkPrice(event.target.value)}
+                    placeholder="Bulk price"
+                    aria-label="Set all variation prices"
+                    className="min-h-10 min-w-0 flex-1 rounded-lg border border-[#d6ddd5] px-3 text-xs"
+                  />
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={bulkStock}
+                    onChange={(event) => setBulkStock(event.target.value)}
+                    placeholder="Bulk stock"
+                    aria-label="Set all variation stock"
+                    className="min-h-10 min-w-0 flex-1 rounded-lg border border-[#d6ddd5] px-3 text-xs"
+                  />
+                  <Button kind="secondary" onClick={applyBulk}>
+                    Apply to all
+                  </Button>
+                </div>
+              </>
+            )}
+            {!isCreating && (
+              <>
+                <p className="mt-1 text-xs text-[#6f7c74]">
+                  Adjust stock in Inventory management.
+                </p>
+                <div className="mt-3 flex gap-2">
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={bulkPrice}
+                    onChange={(event) => setBulkPrice(event.target.value)}
+                    placeholder="Bulk price"
+                    aria-label="Set all variation prices"
+                    className="min-h-10 min-w-0 flex-1 rounded-lg border border-[#d6ddd5] px-3 text-xs"
+                  />
+                  <Button kind="secondary" onClick={applyBulk}>
+                    Apply to all
+                  </Button>
+                </div>
+              </>
+            )}
           </div>
           <div className="table-wrap max-h-[420px] overflow-y-auto">
             <table className="variation-table">
@@ -4353,7 +4381,7 @@ function VariationEditor({
                   <th>Variation</th>
                   <th>SKU</th>
                   <th>Price</th>
-                  <th>Stock</th>
+                  {isCreating && <th>Stock</th>}
                   <th>Image</th>
                   <th>Active</th>
                 </tr>
@@ -4384,18 +4412,20 @@ function VariationEditor({
                         }
                       />
                     </td>
-                    <td data-label="Stock">
-                      <input
-                        type="number"
-                        min="0"
-                        step="1"
-                        value={variation.stock}
-                        onChange={(event) =>
-                          updateVariation(variation.key, { stock: Number(event.target.value) })
-                        }
-                        className="w-20"
-                      />
-                    </td>
+                    {isCreating && (
+                      <td data-label="Stock">
+                        <input
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={variation.stock}
+                          onChange={(event) =>
+                            updateVariation(variation.key, { stock: Number(event.target.value) })
+                          }
+                          className="w-20"
+                        />
+                      </td>
+                    )}
                     <td data-label="Image">
                       <VariationImageField
                         value={variation.image}
@@ -5095,7 +5125,7 @@ function ManagementPage({ page }: { page: string }) {
                     />
                   </label>
                 </div>
-                {draft.productType === "simple" && (
+                {draft.productType === "simple" && editing === "new" && (
                   <div className="mt-4">
                     <label className="field">
                       Initial stock
@@ -5121,6 +5151,7 @@ function ManagementPage({ page }: { page: string }) {
                     attributes={draft.attributes}
                     variations={draft.variations}
                     basePrice={draft.price === "" ? Number.NaN : Number(draft.price)}
+                    isCreating={editing === "new"}
                     onAttributesChange={(attributes) => setDraft({ ...draft, attributes })}
                     onVariationsChange={(variations) => setDraft({ ...draft, variations })}
                   />
