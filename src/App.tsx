@@ -2232,8 +2232,12 @@ function AdminReportsPage() {
         }
       />
       {error && (
-        <div className="mb-5 rounded-xl border border-[#dfc6bd] bg-[#fbefeb] p-4 text-xs text-[#8b4333]">
-          {error}
+        <div className="mb-5 rounded-xl border border-[#dfc6bd] bg-[#fbefeb] p-4">
+          <p className="text-xs text-[#8b4333]">{error}</p>
+          <p className="mt-2 text-xs text-[#a86155]">
+            If this persists, the backend may not be deployed yet. Contact your system
+            administrator.
+          </p>
         </div>
       )}
       {data && (
@@ -4193,6 +4197,9 @@ function VariationEditor({
         <div className="overflow-hidden rounded-xl border border-[#dce2da] bg-white">
           <div className="border-b border-[#e2e6df] p-4">
             <h3 className="text-sm font-semibold text-[#29483a]">Variations</h3>
+            <p className="mt-1 text-xs text-[#6f7c74]">
+              New variations start with 0 stock. After saving, adjust stock in Inventory management.
+            </p>
             <div className="mt-3 flex gap-2">
               <input
                 type="number"
@@ -4216,6 +4223,7 @@ function VariationEditor({
                   <th>Variation</th>
                   <th>SKU</th>
                   <th>Price</th>
+                  <th>Stock</th>
                   <th>Image</th>
                   <th>Active</th>
                 </tr>
@@ -4244,6 +4252,18 @@ function VariationEditor({
                         onChange={(event) =>
                           updateVariation(variation.key, { price: Number(event.target.value) })
                         }
+                      />
+                    </td>
+                    <td data-label="Stock">
+                      <input
+                        type="number"
+                        min="0"
+                        step="1"
+                        value={variation.stock}
+                        onChange={(event) =>
+                          updateVariation(variation.key, { stock: Number(event.target.value) })
+                        }
+                        className="w-20"
                       />
                     </td>
                     <td data-label="Image">
