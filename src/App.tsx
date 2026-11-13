@@ -85,12 +85,104 @@ import {
   variationLabel,
 } from "./variations";
 
+// Counter animation hook
+function useCounterAnimation(target: number, duration = 800) {
+  const [count, setCount] = useState(0);
+  const [hasAnimated, setHasAnimated] = useState(false);
+
+  useEffect(() => {
+    if (hasAnimated || target === 0) {
+      setCount(target);
+      return;
+    }
+
+    setHasAnimated(true);
+    let startTime: number | null = null;
+    const startValue = 0;
+
+    const animate = (currentTime: number) => {
+      if (startTime === null) startTime = currentTime;
+      const elapsed = currentTime - startTime;
+      const progress = Math.min(elapsed / duration, 1);
+      
+      // Easing function for smooth animation
+      const easeOutQuart = 1 - Math.pow(1 - progress, 4);
+      const currentCount = Math.floor(startValue + (target - startValue) * easeOutQuart);
+      
+      setCount(currentCount);
+
+      if (progress < 1) {
+        requestAnimationFrame(animate);
+      } else {
+        setCount(target);
+      }
+    };
+
+    requestAnimationFrame(animate);
+  }, [target, duration, hasAnimated]);
+
+  return count;
+}
+
+// Skeleton loading component
+function Skeleton({ className = "", width = "100%", height = "1rem" }: { className?: string; width?: string; height?: string }) {
+  return (
+    <div 
+      className={`animate-pulse rounded bg-[#e7ece6] ${className}`}
+      style={{ width, height }}
+      aria-hidden="true"
+    />
+  );
+}
+
+// Skeleton card for product/inventory lists
+function SkeletonCard() {
+  return (
+    <div className="overflow-hidden rounded-xl border border-[#dfe3dc] bg-white p-4">
+      <div className="flex items-start gap-4">
+        <Skeleton width="4rem" height="4rem" className="shrink-0 rounded-lg" />
+        <div className="min-w-0 flex-1 space-y-2">
+          <Skeleton width="70%" height="1rem" />
+          <Skeleton width="50%" height="0.875rem" />
+          <Skeleton width="40%" height="0.875rem" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Skeleton for table rows
+function SkeletonTableRow({ columns = 4 }: { columns?: number }) {
+  return (
+    <tr>
+      {Array.from({ length: columns }).map((_, i) => (
+        <td key={i}>
+          <Skeleton width={i === 0 ? "80%" : "60%"} height="0.875rem" />
+        </td>
+      ))}
+    </tr>
+  );
+}
+
+// Animated counter component
+function AnimatedCounter({ value, prefix = "", suffix = "" }: { value: number; prefix?: string; suffix?: string }) {
+  const animatedValue = useCounterAnimation(value);
+  return <>{prefix}{animatedValue.toLocaleString()}{suffix}</>;
+}
+
+// Animated currency counter
+function AnimatedCurrency({ value }: { value: number }) {
+  const animatedValue = useCounterAnimation(value);
+  return <>₱{animatedValue.toFixed(2)}</>;
+}
+
+
 type ProductStore = {
   products: Product[];
   loading: boolean;
   error: string | null;
-  addProduct: (product: Omit<Product, "id" | "stock">) => Promise<void>;
-  editProduct: (id: number, updates: Partial<Omit<Product, "id" | "stock">>) => Promise<void>;
+  addProduct: (product: Omit<Product, "id">) => Promise<void>;
+  editProduct: (id: number, updates: Partial<Omit<Product, "id">>) => Promise<void>;
   removeProduct: (id: number) => Promise<void>;
   refreshProducts: () => Promise<void>;
 };
@@ -727,7 +819,7 @@ function FeedbackToast({
           }
         />
       </span>
-      <p className="min-w-0 flex-1 pt-1 text-xs font-medium leading-5 text-[#385044]">{message}</p>
+      <p className="min-w-0 flex-1 text-xs font-medium leading-5 text-[#385044] flex items-center">{message}</p>
       <button
         type="button"
         onClick={onClose}
@@ -2101,45 +2193,55 @@ function Stats({
   reports: AdminReportData | null;
   products: Product[];
 }) {
+  const loading = role === "admin" && !reports;
+  
   const cards =
     role === "staff"
       ? [
           [
             "Active online orders",
-            String(
-              onlineOrders.filter(
-                (order) => order.status !== "Completed" && order.status !== "Cancelled",
-              ).length,
-            ),
+            onlineOrders.filter(
+              (order) => order.status !== "Completed" && order.status !== "Cancelled",
+            ).length,
+            "count",
           ],
           [
             "Awaiting review",
-            String(onlineOrders.filter((order) => order.status === "Pending review").length),
+            onlineOrders.filter((order) => order.status === "Pending review").length,
+            "count",
           ],
           [
             "Stock conflicts",
-            String(onlineOrders.filter((order) => order.status === "Awaiting restock").length),
+            onlineOrders.filter((order) => order.status === "Awaiting restock").length,
+            "count",
           ],
           [
             "Ready for pickup",
-            String(onlineOrders.filter((order) => order.status === "Ready for pickup").length),
+            onlineOrders.filter((order) => order.status === "Ready for pickup").length,
+            "count",
           ],
         ]
       : [
-          ["Recorded sales", peso(reports?.summary.totalSales ?? 0)],
-          ["Transactions", String(reports?.summary.transactionCount ?? 0)],
-          ["Active products", String(products.length)],
-          ["Low-stock items", String(products.filter((product) => product.stock < 20).length)],
+          ["Recorded sales", reports?.summary.totalSales ?? 0, "currency"],
+          ["Transactions", reports?.summary.transactionCount ?? 0, "count"],
+          ["Active products", products.length, "count"],
+          ["Low-stock items", products.filter((product) => product.stock < 20).length, "count"],
         ];
   return (
     <div className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-      {cards.map(([label, value]) => (
-        <div key={label} className="rounded-lg border border-[#dfe3da] bg-white p-4">
+      {cards.map(([label, value, type]) => (
+        <div key={label as string} className="rounded-lg border border-[#dfe3da] bg-white p-4">
           <div className="text-[10px] font-semibold uppercase tracking-[.1em] text-[#879087]">
-            {label}
+            {label as string}
           </div>
           <div className="mt-3 text-2xl font-semibold tracking-[-.03em] text-[#173f30]">
-            {value}
+            {loading ? (
+              <Skeleton width="60%" height="2rem" />
+            ) : type === "currency" ? (
+              <AnimatedCurrency value={value as number} />
+            ) : (
+              <AnimatedCounter value={value as number} />
+            )}
           </div>
           <div className="mt-2 text-[10px] text-[#718078]">Current recorded data</div>
         </div>
@@ -2244,16 +2346,22 @@ function AdminReportsPage() {
         <>
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             {[
-              ["Recorded sales", peso(data.summary.totalSales)],
-              ["Transactions", String(data.summary.transactionCount)],
-              ["Walk-in sales", peso(data.summary.walkInSales)],
-              ["Online sales", peso(data.summary.onlineSales)],
-            ].map(([label, value]) => (
-              <article key={label} className="rounded-xl border border-[#dfe3da] bg-white p-5">
+              ["Recorded sales", data.summary.totalSales, "currency"],
+              ["Transactions", data.summary.transactionCount, "count"],
+              ["Walk-in sales", data.summary.walkInSales, "currency"],
+              ["Online sales", data.summary.onlineSales, "currency"],
+            ].map(([label, value, type]) => (
+              <article key={label as string} className="rounded-xl border border-[#dfe3da] bg-white p-5">
                 <div className="text-[10px] font-bold uppercase tracking-wide text-[#6f7c74]">
-                  {label}
+                  {label as string}
                 </div>
-                <div className="mt-3 text-2xl font-semibold text-[#173f30]">{value}</div>
+                <div className="mt-3 text-2xl font-semibold text-[#173f30]">
+                  {type === "currency" ? (
+                    <AnimatedCurrency value={value as number} />
+                  ) : (
+                    <AnimatedCounter value={value as number} />
+                  )}
+                </div>
               </article>
             ))}
           </div>
@@ -2319,37 +2427,45 @@ function AdminReportsPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredTransactions.map((transaction) => (
-                      <tr key={transaction.id}>
-                        <td data-label="Reference" className="font-semibold">
-                          {transaction.id}
-                          <span className="mt-1 block max-w-sm text-[10px] font-normal leading-4 text-[#6f7c74]">
-                            {(transaction.items ?? [])
-                              .map(
-                                (item) =>
-                                  `${item.productName}${item.variationLabel ? ` · ${item.variationLabel}` : ""} × ${item.quantity}`,
-                              )
-                              .join(", ")}
-                          </span>
-                        </td>
-                        <td data-label="Source" className="capitalize">
-                          {transaction.source}
-                        </td>
-                        <td data-label="Items">{transaction.itemCount}</td>
-                        <td data-label="Total">{peso(transaction.total)}</td>
-                        <td data-label="Date">
-                          {new Date(transaction.createdAt).toLocaleDateString()}
-                        </td>
-                      </tr>
-                    ))}
-                    {!filteredTransactions.length && (
-                      <tr>
-                        <td colSpan={5} className="py-10 text-center">
-                          {data.transactions.length
-                            ? "No transactions match these filters."
-                            : "No completed transactions yet."}
-                        </td>
-                      </tr>
+                    {loading ? (
+                      Array.from({ length: 5 }).map((_, i) => (
+                        <SkeletonTableRow key={i} columns={5} />
+                      ))
+                    ) : (
+                      <>
+                        {filteredTransactions.map((transaction) => (
+                          <tr key={transaction.id}>
+                            <td data-label="Reference" className="font-semibold">
+                              {transaction.id}
+                              <span className="mt-1 block max-w-sm text-[10px] font-normal leading-4 text-[#6f7c74]">
+                                {(transaction.items ?? [])
+                                  .map(
+                                    (item) =>
+                                      `${item.productName}${item.variationLabel ? ` · ${item.variationLabel}` : ""} × ${item.quantity}`,
+                                  )
+                                  .join(", ")}
+                              </span>
+                            </td>
+                            <td data-label="Source" className="capitalize">
+                              {transaction.source}
+                            </td>
+                            <td data-label="Items">{transaction.itemCount}</td>
+                            <td data-label="Total">{peso(transaction.total)}</td>
+                            <td data-label="Date">
+                              {new Date(transaction.createdAt).toLocaleDateString()}
+                            </td>
+                          </tr>
+                        ))}
+                        {!loading && !filteredTransactions.length && (
+                          <tr>
+                            <td colSpan={5} className="py-10 text-center">
+                              {data && data.transactions.length
+                                ? "No transactions match these filters."
+                                : "No completed transactions yet."}
+                            </td>
+                          </tr>
+                        )}
+                      </>
                     )}
                   </tbody>
                 </table>
@@ -3849,6 +3965,7 @@ type ProductDraft = {
   name: string;
   category: string;
   price: string;
+  stock: string;
   description: string;
   image: string;
   productType: "simple" | "variable";
@@ -4039,6 +4156,7 @@ function VariationEditor({
 }) {
   const [valueDrafts, setValueDrafts] = useState<Record<string, string>>({});
   const [bulkPrice, setBulkPrice] = useState("");
+  const [bulkStock, setBulkStock] = useState("");
   const combinations = generateVariationValues(attributes);
   const generatedKeys = new Set(combinations.map(variationKey));
   const hasDefaultPrice = Number.isFinite(basePrice) && basePrice >= 0;
@@ -4080,10 +4198,12 @@ function VariationEditor({
     );
   const applyBulk = () => {
     const price = bulkPrice === "" ? null : Number(bulkPrice);
+    const stock = bulkStock === "" ? null : Number(bulkStock);
     onVariationsChange(
       variations.map((variation) => ({
         ...variation,
         ...(price !== null && price >= 0 ? { price } : {}),
+        ...(stock !== null && stock >= 0 ? { stock } : {}),
       })),
     );
   };
@@ -4198,7 +4318,7 @@ function VariationEditor({
           <div className="border-b border-[#e2e6df] p-4">
             <h3 className="text-sm font-semibold text-[#29483a]">Variations</h3>
             <p className="mt-1 text-xs text-[#6f7c74]">
-              New variations start with 0 stock. After saving, adjust stock in Inventory management.
+              Set initial stock for variations here, or adjust later in Inventory management.
             </p>
             <div className="mt-3 flex gap-2">
               <input
@@ -4209,6 +4329,16 @@ function VariationEditor({
                 onChange={(event) => setBulkPrice(event.target.value)}
                 placeholder="Bulk price"
                 aria-label="Set all variation prices"
+                className="min-h-10 min-w-0 flex-1 rounded-lg border border-[#d6ddd5] px-3 text-xs"
+              />
+              <input
+                type="number"
+                min="0"
+                step="1"
+                value={bulkStock}
+                onChange={(event) => setBulkStock(event.target.value)}
+                placeholder="Bulk stock"
+                aria-label="Set all variation stock"
                 className="min-h-10 min-w-0 flex-1 rounded-lg border border-[#d6ddd5] px-3 text-xs"
               />
               <Button kind="secondary" onClick={applyBulk}>
@@ -4323,6 +4453,7 @@ function ManagementPage({ page }: { page: string }) {
     name: "",
     category: "School Supplies",
     price: "",
+    stock: "",
     description: "",
     image: "/assets/stationery.jpg",
     productType: "simple",
@@ -4396,6 +4527,7 @@ function ManagementPage({ page }: { page: string }) {
             name: product.name,
             category: product.category,
             price: String(product.price),
+            stock: String(product.stock),
             description: product.description,
             image: product.image,
             productType:
@@ -4412,6 +4544,7 @@ function ManagementPage({ page }: { page: string }) {
             name: "",
             category: "School Supplies",
             price: "",
+            stock: "",
             description: "",
             image: "/assets/stationery.jpg",
             productType: "simple",
@@ -4440,6 +4573,7 @@ function ManagementPage({ page }: { page: string }) {
         attributes: draft.productType === "variable" ? draft.attributes : [],
         variations: draft.productType === "variable" ? draft.variations : [],
         price: Number(draft.price),
+        stock: draft.productType === "simple" ? Number(draft.stock || 0) : 0,
         sizes: [],
       };
       if (
@@ -4642,45 +4776,53 @@ function ManagementPage({ page }: { page: string }) {
                 </tr>
               </thead>
               <tbody>
-                {filteredInventoryLines.map((line) => (
-                  <tr key={line.key}>
-                    <td data-label="Product" className="font-semibold">
-                      {line.productName}
-                    </td>
-                    <td data-label="Variation">
-                      {line.variationLabel ?? "Standard"}
-                      {!line.active && (
-                        <span className="ml-2 text-[9px] font-semibold text-[#8a6355]">
-                          Inactive
-                        </span>
-                      )}
-                    </td>
-                    <td data-label="Category">{line.category}</td>
-                    <td data-label="On hand" className="font-bold text-[#214536]">
-                      {line.stock}
-                    </td>
-                    <td data-label="Status">
-                      <Pill tone={line.stock <= 0 ? "gray" : line.stock < 20 ? "amber" : "green"}>
-                        {line.stock <= 0
-                          ? "Out of stock"
-                          : line.stock < 20
-                            ? "Low stock"
-                            : "Available"}
-                      </Pill>
-                    </td>
-                    <td data-label="Actions">
-                      <Button kind="secondary" onClick={() => openInventoryAdjustment(line)}>
-                        Adjust stock
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
-                {!filteredInventoryLines.length && (
-                  <tr>
-                    <td colSpan={6} className="py-12 text-center text-xs text-[#69766e]">
-                      No inventory records match these filters.
-                    </td>
-                  </tr>
+                {loading ? (
+                  Array.from({ length: 6 }).map((_, i) => (
+                    <SkeletonTableRow key={i} columns={6} />
+                  ))
+                ) : (
+                  <>
+                    {filteredInventoryLines.map((line) => (
+                      <tr key={line.key}>
+                        <td data-label="Product" className="font-semibold">
+                          {line.productName}
+                        </td>
+                        <td data-label="Variation">
+                          {line.variationLabel ?? "Standard"}
+                          {!line.active && (
+                            <span className="ml-2 text-[9px] font-semibold text-[#8a6355]">
+                              Inactive
+                            </span>
+                          )}
+                        </td>
+                        <td data-label="Category">{line.category}</td>
+                        <td data-label="On hand" className="font-bold text-[#214536]">
+                          {line.stock}
+                        </td>
+                        <td data-label="Status">
+                          <Pill tone={line.stock <= 0 ? "gray" : line.stock < 20 ? "amber" : "green"}>
+                            {line.stock <= 0
+                              ? "Out of stock"
+                              : line.stock < 20
+                                ? "Low stock"
+                                : "Available"}
+                          </Pill>
+                        </td>
+                        <td data-label="Actions">
+                          <Button kind="secondary" onClick={() => openInventoryAdjustment(line)}>
+                            Adjust stock
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+                    {!loading && !filteredInventoryLines.length && (
+                      <tr>
+                        <td colSpan={6} className="py-12 text-center text-xs text-[#69766e]">
+                          No inventory records match these filters.
+                        </td>
+                      </tr>
+                    )}
+                  </>
                 )}
               </tbody>
             </table>
@@ -4953,6 +5095,24 @@ function ManagementPage({ page }: { page: string }) {
                     />
                   </label>
                 </div>
+                {draft.productType === "simple" && (
+                  <div className="mt-4">
+                    <label className="field">
+                      Initial stock
+                      <input
+                        type="number"
+                        min="0"
+                        step="1"
+                        value={draft.stock}
+                        onChange={(event) => setDraft({ ...draft, stock: event.target.value })}
+                        placeholder="0"
+                      />
+                    </label>
+                    <p className="mt-1.5 text-[9px] text-[#68766e]">
+                      You can adjust stock later in Inventory management.
+                    </p>
+                  </div>
+                )}
               </section>
 
               {draft.productType === "variable" && (
@@ -5029,47 +5189,53 @@ function ManagementPage({ page }: { page: string }) {
               </tr>
             </thead>
             <tbody>
-              {filteredManagementItems.map((item) => {
-                const activeVariations = (item.variations ?? []).filter(
-                  (variation) => variation.active,
-                );
-                const prices = activeVariations.map((variation) => variation.price);
-                const priceRange = prices.length
-                  ? `${peso(Math.min(...prices))}${Math.min(...prices) === Math.max(...prices) ? "" : ` – ${peso(Math.max(...prices))}`}`
-                  : peso(item.price);
-                return (
-                  <tr key={item.id}>
-                    <td data-label="Product" className="font-semibold">
-                      {item.name}
-                      {item.productType === "variable" && (
-                        <span className="mt-1 block text-[10px] font-normal text-[#748078]">
-                          {activeVariations.length} active variation
-                          {activeVariations.length === 1 ? "" : "s"}
-                        </span>
-                      )}
-                    </td>
-                    <td data-label="Category">{item.category}</td>
-                    <td data-label="Type">
-                      {item.productType === "variable" ? "With options" : "Simple"}
-                    </td>
-                    <td data-label="Price">{priceRange}</td>
-                    <td data-label="Updated">
-                      {item.updatedAt ? new Date(item.updatedAt).toLocaleDateString() : "—"}
-                    </td>
-                    <td data-label="Actions">
-                      <div className="flex gap-3">
-                        <button
-                          onClick={() => openProductForm(item)}
-                          className="min-h-11 rounded-lg px-3 font-semibold text-[#184d37] hover:bg-[#edf2eb]"
-                        >
-                          Manage
-                        </button>
-                        {isProduct && (
-                          <button
-                            onClick={() =>
-                              setConfirmation({
-                                title: "Remove this product?",
-                                message: `${item.name} will be removed from active inventory and will no longer be available for ordering.`,
+              {loading ? (
+                Array.from({ length: 5 }).map((_, i) => (
+                  <SkeletonTableRow key={i} columns={6} />
+                ))
+              ) : (
+                <>
+                  {filteredManagementItems.map((item) => {
+                    const activeVariations = (item.variations ?? []).filter(
+                      (variation) => variation.active,
+                    );
+                    const prices = activeVariations.map((variation) => variation.price);
+                    const priceRange = prices.length
+                      ? `${peso(Math.min(...prices))}${Math.min(...prices) === Math.max(...prices) ? "" : ` – ${peso(Math.max(...prices))}`}`
+                      : peso(item.price);
+                    return (
+                      <tr key={item.id}>
+                        <td data-label="Product" className="font-semibold">
+                          {item.name}
+                          {item.productType === "variable" && (
+                            <span className="mt-1 block text-[10px] font-normal text-[#748078]">
+                              {activeVariations.length} active variation
+                              {activeVariations.length === 1 ? "" : "s"}
+                            </span>
+                          )}
+                        </td>
+                        <td data-label="Category">{item.category}</td>
+                        <td data-label="Type">
+                          {item.productType === "variable" ? "With options" : "Simple"}
+                        </td>
+                        <td data-label="Price">{priceRange}</td>
+                        <td data-label="Updated">
+                          {item.updatedAt ? new Date(item.updatedAt).toLocaleDateString() : "—"}
+                        </td>
+                        <td data-label="Actions">
+                          <div className="flex gap-3">
+                            <button
+                              onClick={() => openProductForm(item)}
+                              className="min-h-11 rounded-lg px-3 font-semibold text-[#184d37] hover:bg-[#edf2eb]"
+                            >
+                              Manage
+                            </button>
+                            {isProduct && (
+                              <button
+                                onClick={() =>
+                                  setConfirmation({
+                                    title: "Remove this product?",
+                                    message: `${item.name} will be removed from active inventory and will no longer be available for ordering.`,
                                 confirmLabel: "Remove product",
                                 destructive: true,
                                 onConfirm: () => deleteProduct(item),
@@ -5085,12 +5251,14 @@ function ManagementPage({ page }: { page: string }) {
                   </tr>
                 );
               })}
-              {!filteredManagementItems.length && (
+              {!loading && !filteredManagementItems.length && (
                 <tr>
                   <td colSpan={6} className="py-12 text-center text-xs text-[#69766e]">
                     No records match your search and filters.
                   </td>
                 </tr>
+              )}
+                </>
               )}
             </tbody>
           </table>

@@ -140,7 +140,7 @@ export async function getProducts() {
   return (await apiRequest<{ products: Product[] }>("/products")).products;
 }
 
-export async function createProduct(product: Omit<Product, "id" | "stock">) {
+export async function createProduct(product: Omit<Product, "id">) {
   const created = (
     await apiRequest<{ product: Product }>(
       "/products",
@@ -167,7 +167,7 @@ export async function uploadProductImage(file: File) {
   ).url;
 }
 
-export async function updateProduct(id: number, updates: Partial<Omit<Product, "id" | "stock">>) {
+export async function updateProduct(id: number, updates: Partial<Omit<Product, "id">>) {
   const updated = (
     await apiRequest<{ product: Product }>(
       `/products/${id}`,
