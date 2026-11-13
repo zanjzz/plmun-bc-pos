@@ -669,8 +669,9 @@ app.post(`${prefix}/auth/demo-login`, async (c) => {
     const existing = await findAuthUserByEmail(account.email);
     let user = existing;
     if (existing) {
+      // Don't update password for existing users to allow concurrent sessions
+      // Only update metadata if needed
       const { data, error } = await client.auth.admin.updateUserById(existing.id, {
-        password: account.password,
         user_metadata: {
           name: account.profile.full_name,
           role: account.profile.role,
