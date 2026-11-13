@@ -588,11 +588,13 @@ function NotificationCenter({
                       {canDismiss && (
                         <button
                           type="button"
-                          onClick={() => {
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
                             void removeNotification(notification);
                             setSwipedId(null);
                           }}
-                          className="absolute inset-y-0 right-0 flex w-20 items-center justify-center bg-[#a13f32] sm:hidden"
+                          className="absolute inset-y-0 right-0 flex w-20 items-center justify-center bg-[#a13f32] sm:hidden z-10"
                           aria-label={`Delete ${notification.title}`}
                         >
                           <Trash2 size={20} className="text-white" />
