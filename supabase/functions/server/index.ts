@@ -56,7 +56,7 @@ const normalizeVariation = (row: any) => ({
 const toProduct = (row: any) => {
   const variations = (row.product_variations ?? []).map(normalizeVariation);
   const activeVariations = variations.filter((variation: any) => variation.active);
-  const variable = row.product_type === "variable";
+  const variable = row.product_type === "variable" || activeVariations.length > 0;
   return {
     id: Number(row.id),
     updatedAt: row.updated_at,
@@ -134,11 +134,7 @@ function validateProductInput(
 ) {
   if (!String(input.name ?? "").trim()) return "Enter a product name.";
   const price = Number(input.price);
-  const stock = Number(input.stock);
   if (!Number.isFinite(price) || price < 0) return "Price must be zero or greater.";
-  if (productType === "simple" && (!Number.isInteger(stock) || stock < 0)) {
-    return "Stock must be a whole number of zero or greater.";
-  }
   if (productType === "simple") return null;
   if (!attributes.length || !variations.length) {
     return "Variable products need attributes and at least one variation.";
@@ -988,7 +984,8 @@ app.post(`${prefix}/products`, async (c) => {
   const auth = await requireRole(c, ["admin"]);
   if (auth.response) return auth.response;
   const input = await c.req.json();
-  const productType = input.productType === "variable" ? "variable" : "simple";
+  const productType =
+    input.productType === "variable" || input.product_type === "variable" ? "variable" : "simple";
   const attributes = cleanAttributes(input.attributes);
   const variations = cleanVariations(input.variations);
   for (const variation of variations) {
@@ -1002,7 +999,7 @@ app.post(`${prefix}/products`, async (c) => {
       name: String(input.name ?? "").trim(),
       category: String(input.category ?? "School Supplies"),
       price: Number(input.price ?? 0),
-      stock: productType === "variable" ? 0 : Number(input.stock ?? 0),
+      stock: 0,
       image: String(input.image ?? "/assets/stationery.jpg"),
       description: String(input.description ?? ""),
       sizes: Array.isArray(input.sizes) ? input.sizes : [],
@@ -1067,7 +1064,8 @@ app.put(`${prefix}/products/:id`, async (c) => {
   if (auth.response) return auth.response;
   const id = Number(c.req.param("id"));
   const input = await c.req.json();
-  const productType = input.productType === "variable" ? "variable" : "simple";
+  const productType =
+    input.productType === "variable" || input.product_type === "variable" ? "variable" : "simple";
   const attributes = cleanAttributes(input.attributes);
   const variations = cleanVariations(input.variations);
   for (const variation of variations) {
@@ -1080,13 +1078,29 @@ app.put(`${prefix}/products/:id`, async (c) => {
     .select("*, product_variations(*)")
     .eq("id", id)
     .single();
+  if (previous?.product_type !== productType) {
+    const currentStock =
+      previous.product_type === "variable"
+        ? (previous.product_variations ?? []).reduce(
+            (sum: number, variation: any) => sum + Number(variation.stock),
+            0,
+          )
+        : Number(previous.stock);
+    if (currentStock > 0) {
+      return c.json(
+        {
+          error: "Set this product’s inventory to zero before changing whether it has options.",
+        },
+        409,
+      );
+    }
+  }
   let updateQuery = adminClient()
     .from("products")
     .update({
       name: input.name,
       category: input.category,
       price: Number(input.price),
-      stock: productType === "variable" ? 0 : Number(input.stock),
       image: input.image,
       description: input.description,
       sizes: Array.isArray(input.sizes) ? input.sizes : [],
@@ -1115,7 +1129,6 @@ app.put(`${prefix}/products/:id`, async (c) => {
           name: previous.name,
           category: previous.category,
           price: previous.price,
-          stock: previous.stock,
           image: previous.image,
           description: previous.description,
           sizes: previous.sizes,
@@ -1139,50 +1152,56 @@ app.put(`${prefix}/products/:id`, async (c) => {
     );
   }
   const saved = await fetchProduct(id);
-  const movements: any[] = [];
-  if (previous && productType === "simple" && Number(previous.stock) !== Number(data.stock)) {
-    movements.push({
-      product_id: id,
-      movement_type: Number(data.stock) > Number(previous.stock) ? "restock" : "adjustment",
-      quantity_change: Number(data.stock) - Number(previous.stock),
-      stock_after: Number(data.stock),
-      reference_type: "product update",
-      actor_id: auth.profile.id,
-    });
-  }
-  if (previous && productType === "variable") {
-    const previousByKey = new Map(
-      (previous.product_variations ?? []).map((variation: any) => [
-        variation.combination_key,
-        variation,
-      ]),
-    );
-    for (const variation of saved.product_variations ?? []) {
-      const before: any = previousByKey.get(variation.combination_key);
-      const change = Number(variation.stock) - Number(before?.stock ?? 0);
-      if (change) {
-        movements.push({
-          product_id: id,
-          variation_id: variation.id,
-          movement_type: change > 0 ? "restock" : "adjustment",
-          quantity_change: change,
-          stock_after: Number(variation.stock),
-          reference_type: "variation update",
-          actor_id: auth.profile.id,
-        });
-      }
-    }
-  }
-  if (movements.length) {
-    await adminClient().from("inventory_movements").insert(movements);
-    await notifyInventoryLevel(
-      toProduct(saved),
-      toProduct(previous).stock,
-      `product:${id}:stock:${data.updated_at}`,
-    );
-    await reconcileOnlineOrders();
-  }
   return c.json({ product: toProduct(saved) });
+});
+
+app.post(`${prefix}/inventory/adjust`, async (c) => {
+  const auth = await requireRole(c, ["admin"]);
+  if (auth.response) return auth.response;
+  const input = await c.req.json();
+  const productId = Number(input.productId);
+  const variationId = input.variationId == null ? null : Number(input.variationId);
+  const quantityChange = Number(input.quantityChange);
+  if (
+    !Number.isInteger(productId) ||
+    !Number.isInteger(quantityChange) ||
+    quantityChange === 0 ||
+    (variationId !== null && !Number.isInteger(variationId))
+  ) {
+    return c.json({ error: "Enter a valid non-zero stock adjustment." }, 400);
+  }
+  let before;
+  try {
+    before = await fetchProduct(productId);
+  } catch {
+    return c.json({ error: "Product not found." }, 400);
+  }
+  const previousStock = toProduct(before).stock;
+  const { data: stockAfter, error } = await adminClient().rpc("adjust_inventory", {
+    p_product_id: productId,
+    p_variation_id: variationId,
+    p_quantity_change: quantityChange,
+    p_actor_id: auth.profile.id,
+    p_reason: quantityChange > 0 ? "Stock received" : "Manual adjustment",
+  });
+  if (error) {
+    const conflict =
+      error.message.includes("below zero") ||
+      error.message.includes("not found") ||
+      error.message.includes("reserved quantity");
+    return c.json(
+      { error: conflict ? error.message : "Inventory could not be adjusted." },
+      conflict ? 409 : 400,
+    );
+  }
+  const saved = await fetchProduct(productId);
+  await notifyInventoryLevel(
+    toProduct(saved),
+    previousStock,
+    `product:${productId}:inventory:${Date.now()}`,
+  );
+  await reconcileOnlineOrders();
+  return c.json({ product: toProduct(saved), stockAfter: Number(stockAfter) });
 });
 
 app.delete(`${prefix}/products/:id`, async (c) => {
@@ -1241,11 +1260,10 @@ app.get(`${prefix}/admin/reports`, async (c) => {
     client
       .from("transactions")
       .select("*, transaction_items(*)")
-      .order("created_at", { ascending: false })
-      .limit(100),
+      .order("created_at", { ascending: false }),
     client
       .from("inventory_movements")
-      .select("*, products(name)")
+      .select("*, products(name), product_variations(attributes)")
       .order("created_at", { ascending: false })
       .limit(100),
   ]);
@@ -1275,13 +1293,25 @@ app.get(`${prefix}/admin/reports`, async (c) => {
         (sum: number, item: any) => sum + Number(item.quantity),
         0,
       ),
+      items: (transaction.transaction_items ?? []).map((item: any) => ({
+        productName: item.product_name,
+        variationLabel: item.variation_label ?? null,
+        quantity: Number(item.quantity),
+        unitPrice: Number(item.unit_price),
+      })),
       orderId: transaction.order_id,
       createdAt: transaction.created_at,
     })),
     inventoryMovements: movements.map((movement: any) => ({
       id: movement.id,
       productName: movement.products?.name ?? "Product",
+      variationLabel: movement.product_variations
+        ? Object.values(movement.product_variations.attributes ?? {})
+            .filter(Boolean)
+            .join(" / ")
+        : null,
       type: movement.movement_type,
+      reason: movement.reference_type,
       quantityChange: Number(movement.quantity_change),
       stockAfter: Number(movement.stock_after),
       reference: movement.reference_id,
@@ -1435,7 +1465,7 @@ app.put(`${prefix}/orders/:id/status`, async (c) => {
     "Awaiting restock": ["Pending review", "Confirmed"],
     "Ready for pickup": ["Confirmed"],
     Completed: ["Ready for pickup"],
-    Cancelled: ["Pending review", "Confirmed", "Awaiting restock"],
+    Cancelled: ["Pending review", "Confirmed", "Awaiting restock", "Ready for pickup"],
   };
   if (!validTransitions[status]?.includes(order.status)) {
     return c.json(
@@ -1453,64 +1483,54 @@ app.put(`${prefix}/orders/:id/status`, async (c) => {
     return c.json({ order: toOrder(reconciled) });
   }
 
-  let inventoryItemsToRestore: any[] | null = null;
-  if (status === "Ready for pickup" && order.status !== "Ready for pickup") {
-    const inventoryItems = order.order_items.map((item: any) => ({
-      productId: Number(item.product_id),
-      variationId: item.variation_id ? Number(item.variation_id) : null,
-      quantity: Number(item.quantity),
-    }));
-    const { data: reserved, error: reserveError } = await adminClient().rpc("reserve_inventory", {
-      p_items: inventoryItems,
-    });
-    if (reserveError) {
+  const inventoryItems = order.order_items.map((item: any) => ({
+    productId: Number(item.product_id),
+    variationId: item.variation_id ? Number(item.variation_id) : null,
+    quantity: Number(item.quantity),
+  }));
+  const statusMessage = String(message ?? order.status_message);
+  let inventoryStatusHandled = false;
+  if (status === "Ready for pickup") {
+    const { data: deducted, error: deductionError } = await adminClient().rpc(
+      "deduct_ready_order_inventory",
+      {
+        p_order_id: order.id,
+        p_items: inventoryItems,
+        p_message: statusMessage,
+        p_actor_id: auth.profile.id,
+        p_reference: order.order_number,
+      },
+    );
+    if (deductionError) {
       await reconcileOnlineOrders();
       return c.json({ error: "One or more order variations are no longer available." }, 409);
     }
-    inventoryItemsToRestore = inventoryItems;
-    const movements = order.order_items.map((item: any) => {
-      const result = (reserved ?? []).find(
-        (entry: any) =>
-          Number(entry.productId) === Number(item.product_id) &&
-          Number(entry.variationId ?? 0) === Number(item.variation_id ?? 0),
-      );
-      return {
-        product_id: item.product_id,
-        variation_id: item.variation_id ?? null,
-        movement_type: "online fulfillment",
-        quantity_change: -Number(item.quantity),
-        stock_after: Number(result?.stockAfter ?? 0),
-        reference_type: "order",
-        reference_id: order.order_number,
-        actor_id: auth.profile.id,
-      };
-    });
-    const { error: movementError } = await adminClient()
-      .from("inventory_movements")
-      .insert(movements);
-    if (movementError) {
-      await adminClient().rpc("restore_inventory", { p_items: inventoryItems });
-      return c.json(
-        { error: "Inventory records could not be completed. Stock was restored." },
-        500,
-      );
+    if (deducted === null) {
+      return c.json({ order: toOrder(await fetchOrderByNumber(order.order_number)) });
     }
+    inventoryStatusHandled = true;
+  }
+  if (status === "Cancelled" && order.status === "Ready for pickup") {
+    const { error: returnError } = await adminClient().rpc("cancel_ready_order_inventory", {
+      p_order_id: order.id,
+      p_items: inventoryItems,
+      p_message: statusMessage,
+      p_actor_id: auth.profile.id,
+      p_reference: order.order_number,
+    });
+    if (returnError) {
+      return c.json({ error: "Deducted inventory could not be returned." }, 409);
+    }
+    inventoryStatusHandled = true;
   }
 
-  const statusMessage = String(message ?? order.status_message);
-  const { error } = await adminClient()
-    .from("orders")
-    .update({ status, status_message: statusMessage })
-    .eq("id", order.id);
+  const { error } = inventoryStatusHandled
+    ? { error: null }
+    : await adminClient()
+        .from("orders")
+        .update({ status, status_message: statusMessage })
+        .eq("id", order.id);
   if (error) {
-    if (inventoryItemsToRestore) {
-      await adminClient().rpc("restore_inventory", { p_items: inventoryItemsToRestore });
-      await adminClient()
-        .from("inventory_movements")
-        .delete()
-        .eq("reference_type", "order")
-        .eq("reference_id", order.order_number);
-    }
     return c.json({ error: "Unable to update the order." }, 500);
   }
   const history = await recordStatus(
@@ -1678,7 +1698,7 @@ app.post(`${prefix}/pos/checkout`, async (c) => {
       type: "transaction",
       title: "Walk-in transaction completed",
       message: `${transactionNumber} was completed for ₱${total.toFixed(2)}.`,
-      actionPage: "Reports & transactions",
+      actionPage: "Sales & transactions",
       entityType: "transaction",
       entityId: transactionNumber,
     });

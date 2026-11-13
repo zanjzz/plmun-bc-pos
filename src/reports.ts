@@ -12,13 +12,21 @@ export type AdminReportData = {
     source: "walk-in" | "online";
     total: number;
     itemCount: number;
+    items: Array<{
+      productName: string;
+      variationLabel: string | null;
+      quantity: number;
+      unitPrice: number;
+    }>;
     orderId: string | null;
     createdAt: string;
   }>;
   inventoryMovements: Array<{
     id: string;
     productName: string;
+    variationLabel: string | null;
     type: string;
+    reason: string | null;
     quantityChange: number;
     stockAfter: number;
     reference: string | null;

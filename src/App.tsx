@@ -67,6 +67,7 @@ import {
   getProducts,
   isPhysicalProduct,
   isServiceProduct,
+  adjustInventory,
   type Product,
   uploadProductImage,
   updateProduct,
@@ -87,8 +88,8 @@ type ProductStore = {
   products: Product[];
   loading: boolean;
   error: string | null;
-  addProduct: (product: Omit<Product, "id">) => Promise<void>;
-  editProduct: (id: number, updates: Partial<Product>) => Promise<void>;
+  addProduct: (product: Omit<Product, "id" | "stock">) => Promise<void>;
+  editProduct: (id: number, updates: Partial<Omit<Product, "id" | "stock">>) => Promise<void>;
   removeProduct: (id: number) => Promise<void>;
   refreshProducts: () => Promise<void>;
 };
@@ -169,7 +170,7 @@ const navByRole: Record<Role, string[]> = {
     "Dashboard",
     "Product management",
     "Inventory management",
-    "Reports & transactions",
+    "Sales & transactions",
     "User management",
   ],
 };
@@ -184,7 +185,7 @@ const navIcons: Record<string, LucideIcon> = {
   "Order management": ClipboardList,
   "Product management": Package,
   "Inventory management": Boxes,
-  "Reports & transactions": BarChart3,
+  "Sales & transactions": BarChart3,
   "User management": Users,
 };
 
@@ -2123,7 +2124,11 @@ function AdminReportsPage() {
   const filteredTransactions =
     data?.transactions.filter((transaction) => {
       const search = query.trim().toLowerCase();
-      const searchable = `${transaction.id} ${transaction.source} ${transaction.orderId ?? ""}`;
+      const searchable = `${transaction.id} ${transaction.source} ${transaction.orderId ?? ""} ${(
+        transaction.items ?? []
+      )
+        .map((item) => `${item.productName} ${item.variationLabel ?? ""}`)
+        .join(" ")}`;
       return (
         (!search || searchable.toLowerCase().includes(search)) &&
         (sourceFilter === "All" || transaction.source === sourceFilter) &&
@@ -2133,11 +2138,17 @@ function AdminReportsPage() {
   const exportTransactions = () => {
     if (!filteredTransactions.length) return;
     const rows = [
-      ["Transaction", "Source", "Items", "Total", "Date"],
+      ["Transaction", "Source", "Items", "Products", "Total", "Date"],
       ...filteredTransactions.map((transaction) => [
         transaction.id,
         transaction.source,
         String(transaction.itemCount),
+        (transaction.items ?? [])
+          .map(
+            (item) =>
+              `${item.productName}${item.variationLabel ? ` (${item.variationLabel})` : ""} × ${item.quantity}`,
+          )
+          .join("; "),
         transaction.total.toFixed(2),
         new Date(transaction.createdAt).toLocaleString(),
       ]),
@@ -2155,8 +2166,8 @@ function AdminReportsPage() {
   return (
     <>
       <SectionTitle
-        title="Reports & transactions"
-        subtitle="Review recorded sales, transaction history, and inventory activity."
+        title="Sales & transactions"
+        subtitle="Audit completed sales, review purchased items, and export transaction records."
         action={
           <div className="flex flex-col gap-2 sm:flex-row">
             <Button kind="secondary" onClick={() => void load(true)} loading={loading}>
@@ -2190,7 +2201,7 @@ function AdminReportsPage() {
               </article>
             ))}
           </div>
-          <div className="mt-5 grid gap-5 xl:grid-cols-[1.2fr_.8fr]">
+          <div className="mt-5">
             <section className="overflow-hidden rounded-xl border border-[#dce1d7] bg-white">
               <div className="border-b border-[#e3e6e1] p-4">
                 <h2 className="text-sm font-semibold text-[#29483a]">Recent transactions</h2>
@@ -2256,6 +2267,14 @@ function AdminReportsPage() {
                       <tr key={transaction.id}>
                         <td data-label="Reference" className="font-semibold">
                           {transaction.id}
+                          <span className="mt-1 block max-w-sm text-[10px] font-normal leading-4 text-[#6f7c74]">
+                            {(transaction.items ?? [])
+                              .map(
+                                (item) =>
+                                  `${item.productName}${item.variationLabel ? ` · ${item.variationLabel}` : ""} × ${item.quantity}`,
+                              )
+                              .join(", ")}
+                          </span>
                         </td>
                         <td data-label="Source" className="capitalize">
                           {transaction.source}
@@ -2278,48 +2297,6 @@ function AdminReportsPage() {
                     )}
                   </tbody>
                 </table>
-              </div>
-            </section>
-            <section className="overflow-hidden rounded-xl border border-[#dce1d7] bg-white">
-              <div className="border-b border-[#e3e6e1] p-4">
-                <h2 className="text-sm font-semibold text-[#29483a]">Recent inventory activity</h2>
-              </div>
-              <div className="max-h-[440px] overflow-y-auto">
-                {data.inventoryMovements.map((movement, index) => (
-                  <div
-                    key={movement.id}
-                    className={`flex items-center justify-between gap-4 p-4 ${
-                      index ? "border-t border-[#e7eae5]" : ""
-                    }`}
-                  >
-                    <div>
-                      <div className="text-xs font-semibold text-[#29483a]">
-                        {movement.productName}
-                      </div>
-                      <div className="mt-1 text-[10px] capitalize text-[#6f7c74]">
-                        {movement.type} · {new Date(movement.createdAt).toLocaleDateString()}
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <div
-                        className={`text-xs font-bold ${
-                          movement.quantityChange < 0 ? "text-[#91483c]" : "text-[#2f7651]"
-                        }`}
-                      >
-                        {movement.quantityChange > 0 ? "+" : ""}
-                        {movement.quantityChange}
-                      </div>
-                      <div className="mt-1 text-[10px] text-[#6f7c74]">
-                        {movement.stockAfter} left
-                      </div>
-                    </div>
-                  </div>
-                ))}
-                {!data.inventoryMovements.length && (
-                  <div className="py-10 text-center text-xs text-[#758078]">
-                    No inventory activity yet.
-                  </div>
-                )}
               </div>
             </section>
           </div>
@@ -2355,7 +2332,7 @@ function Dashboard({ role, setPage }: { role: Role; setPage: (p: string) => void
         subtitle={`Welcome back, Alex. Here’s what’s happening ${role === "staff" ? "today" : "across the center"}.`}
         action={
           role === "admin" ? (
-            <Button onClick={() => setPage("Reports & transactions")}>View reports</Button>
+            <Button onClick={() => setPage("Sales & transactions")}>View sales</Button>
           ) : undefined
         }
       />
@@ -3069,19 +3046,26 @@ function OrderManagementPage() {
     try {
       const message =
         status === "Cancelled"
-          ? "This order was cancelled because stock could not be secured."
+          ? order.status === "Ready for pickup"
+            ? "This prepared order was cancelled and its deducted stock was returned."
+            : "This order was cancelled."
           : status === "Ready for pickup"
             ? "Your order is prepared and ready at the Business Center counter."
             : status === "Completed"
               ? "The order was handed to the student and marked as received."
               : status === "Confirmed"
-                ? "Restocked inventory is now allocated to this order."
+                ? "Inventory is available for this order."
                 : order.statusMessage;
       const updated = await updateOrderStatus(order.id, status, message);
       setOnlineOrders((current) =>
         current.map((candidate) => (candidate.id === updated.id ? updated : candidate)),
       );
-      if (status === "Ready for pickup") await refreshProducts();
+      if (
+        status === "Ready for pickup" ||
+        (status === "Cancelled" && order.status === "Ready for pickup")
+      ) {
+        await refreshProducts();
+      }
       setError("");
       setConfirmation(null);
       setFeedback({
@@ -3109,7 +3093,7 @@ function OrderManagementPage() {
     setConfirmation({
       title: cancelling ? "Cancel this order?" : "Confirm order handoff",
       message: cancelling
-        ? `${order.id} will be cancelled and moved to resolved orders. This action cannot be undone.`
+        ? `${order.id} will be cancelled${order.status === "Ready for pickup" ? " and its deducted stock will be returned" : ""}. This action cannot be undone.`
         : `Confirm that ${order.id} was handed to the student? This completes the order and cannot be undone.`,
       confirmLabel: cancelling ? "Cancel order" : "Confirm handoff",
       destructive: cancelling,
@@ -3273,20 +3257,36 @@ function OrderManagementPage() {
                       </>
                     )}
                     {order.status === "Confirmed" && (
-                      <Button
-                        kind="warning"
-                        className="ready-for-pickup-action"
-                        loading={updatingOrderId === order.id}
-                        disabled={Boolean(updatingOrderId)}
-                        onClick={() => changeStatus(order, "Ready for pickup")}
-                      >
-                        Ready for pickup
-                      </Button>
+                      <>
+                        <Button
+                          kind="warning"
+                          className="ready-for-pickup-action"
+                          loading={updatingOrderId === order.id}
+                          disabled={Boolean(updatingOrderId)}
+                          onClick={() => changeStatus(order, "Ready for pickup")}
+                        >
+                          Ready for pickup
+                        </Button>
+                        <button
+                          onClick={() => requestStatusChange(order, "Cancelled")}
+                          className="danger-button flex min-h-11 items-center gap-1.5 rounded-lg px-3 text-[10px] font-semibold"
+                        >
+                          <XCircle size={13} className="icon-danger" /> Cancel
+                        </button>
+                      </>
                     )}
                     {order.status === "Ready for pickup" && (
-                      <Button onClick={() => requestStatusChange(order, "Completed")}>
-                        Order received
-                      </Button>
+                      <>
+                        <Button onClick={() => requestStatusChange(order, "Completed")}>
+                          Order received
+                        </Button>
+                        <button
+                          onClick={() => requestStatusChange(order, "Cancelled")}
+                          className="danger-button flex min-h-11 items-center gap-1.5 rounded-lg px-3 text-[10px] font-semibold"
+                        >
+                          <XCircle size={13} className="icon-danger" /> Cancel
+                        </button>
+                      </>
                     )}
                   </div>
                 </div>
@@ -3785,12 +3785,22 @@ type ProductDraft = {
   name: string;
   category: string;
   price: string;
-  stock: string;
   description: string;
   image: string;
   productType: "simple" | "variable";
   attributes: ProductAttribute[];
   variations: ProductVariation[];
+};
+
+type InventoryLine = {
+  key: string;
+  productId: number;
+  variationId: number | null;
+  productName: string;
+  variationLabel: string | null;
+  category: string;
+  stock: number;
+  active: boolean;
 };
 
 function ProductImageField({
@@ -3965,9 +3975,9 @@ function VariationEditor({
 }) {
   const [valueDrafts, setValueDrafts] = useState<Record<string, string>>({});
   const [bulkPrice, setBulkPrice] = useState("");
-  const [bulkStock, setBulkStock] = useState("");
   const combinations = generateVariationValues(attributes);
   const generatedKeys = new Set(combinations.map(variationKey));
+  const hasDefaultPrice = Number.isFinite(basePrice) && basePrice >= 0;
   const variationsAreCurrent =
     combinations.length > 0 &&
     variations.length === generatedKeys.size &&
@@ -4006,12 +4016,10 @@ function VariationEditor({
     );
   const applyBulk = () => {
     const price = bulkPrice === "" ? null : Number(bulkPrice);
-    const stock = bulkStock === "" ? null : Number(bulkStock);
     onVariationsChange(
       variations.map((variation) => ({
         ...variation,
         ...(price !== null && price >= 0 ? { price } : {}),
-        ...(stock !== null && Number.isInteger(stock) && stock >= 0 ? { stock } : {}),
       })),
     );
   };
@@ -4106,11 +4114,13 @@ function VariationEditor({
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-[#e2e7e0] pt-4">
           <span className="text-xs font-medium text-[#607068]">
             {combinations.length
-              ? `${combinations.length} variation${combinations.length === 1 ? "" : "s"}`
+              ? hasDefaultPrice
+                ? `${combinations.length} variation${combinations.length === 1 ? "" : "s"}`
+                : "Enter a default price first"
               : "Add values to continue"}
           </span>
           <Button
-            disabled={!combinations.length || variationsAreCurrent}
+            disabled={!combinations.length || !hasDefaultPrice || variationsAreCurrent}
             onClick={generate}
             className="gap-2"
           >
@@ -4123,7 +4133,7 @@ function VariationEditor({
         <div className="overflow-hidden rounded-xl border border-[#dce2da] bg-white">
           <div className="border-b border-[#e2e6df] p-4">
             <h3 className="text-sm font-semibold text-[#29483a]">Variations</h3>
-            <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
+            <div className="mt-3 flex gap-2">
               <input
                 type="number"
                 min="0"
@@ -4132,16 +4142,7 @@ function VariationEditor({
                 onChange={(event) => setBulkPrice(event.target.value)}
                 placeholder="Bulk price"
                 aria-label="Set all variation prices"
-                className="min-h-10 rounded-lg border border-[#d6ddd5] px-3 text-xs"
-              />
-              <input
-                type="number"
-                min="0"
-                value={bulkStock}
-                onChange={(event) => setBulkStock(event.target.value)}
-                placeholder="Bulk stock"
-                aria-label="Set all variation stock"
-                className="min-h-10 rounded-lg border border-[#d6ddd5] px-3 text-xs"
+                className="min-h-10 min-w-0 flex-1 rounded-lg border border-[#d6ddd5] px-3 text-xs"
               />
               <Button kind="secondary" onClick={applyBulk}>
                 Apply to all
@@ -4155,7 +4156,6 @@ function VariationEditor({
                   <th>Variation</th>
                   <th>SKU</th>
                   <th>Price</th>
-                  <th>Stock</th>
                   <th>Image</th>
                   <th>Active</th>
                 </tr>
@@ -4183,16 +4183,6 @@ function VariationEditor({
                         value={variation.price}
                         onChange={(event) =>
                           updateVariation(variation.key, { price: Number(event.target.value) })
-                        }
-                      />
-                    </td>
-                    <td data-label="Stock">
-                      <input
-                        type="number"
-                        min="0"
-                        value={variation.stock}
-                        onChange={(event) =>
-                          updateVariation(variation.key, { stock: Number(event.target.value) })
                         }
                       />
                     </td>
@@ -4243,11 +4233,16 @@ function ManagementPage({ page }: { page: string }) {
   const [query, setQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("All");
   const [stockFilter, setStockFilter] = useState("All");
+  const [inventoryMovements, setInventoryMovements] = useState<
+    AdminReportData["inventoryMovements"]
+  >([]);
+  const [inventoryTarget, setInventoryTarget] = useState<InventoryLine | null>(null);
+  const [adjustmentMode, setAdjustmentMode] = useState<"add" | "remove" | "set">("add");
+  const [adjustmentQuantity, setAdjustmentQuantity] = useState("");
   const [draft, setDraft] = useState<ProductDraft>({
     name: "",
     category: "School Supplies",
-    price: "0",
-    stock: "0",
+    price: "",
     description: "",
     image: "/assets/stationery.jpg",
     productType: "simple",
@@ -4259,14 +4254,54 @@ function ManagementPage({ page }: { page: string }) {
     const searchValue = `${item.name} ${item.category}`;
     const matchesQuery = searchValue.toLowerCase().includes(query.trim().toLowerCase());
     const matchesCategory = categoryFilter === "All" || item.category === categoryFilter;
-    const matchesStock =
-      stockFilter === "All" ||
-      (stockFilter === "Available" && item.stock >= 20) ||
-      (stockFilter === "Low stock" && item.stock > 0 && item.stock < 20) ||
-      (stockFilter === "Out of stock" && item.stock <= 0);
-    return matchesQuery && matchesCategory && matchesStock;
+    return matchesQuery && matchesCategory;
   });
   const managementCategories = [...new Set(products.map((product) => product.category))];
+  const inventoryLines = products.flatMap<InventoryLine>((product) =>
+    product.productType === "variable"
+      ? (product.variations ?? []).map((variation) => ({
+          key: `${product.id}:${variation.id}`,
+          productId: product.id,
+          variationId: variation.id ?? null,
+          productName: product.name,
+          variationLabel: variationLabel(variation.values),
+          category: product.category,
+          stock: variation.stock,
+          active: variation.active,
+        }))
+      : [
+          {
+            key: `${product.id}:simple`,
+            productId: product.id,
+            variationId: null,
+            productName: product.name,
+            variationLabel: null,
+            category: product.category,
+            stock: product.stock,
+            active: true,
+          },
+        ],
+  );
+  const filteredInventoryLines = inventoryLines.filter((line) => {
+    const matchesQuery = `${line.productName} ${line.variationLabel ?? ""}`
+      .toLowerCase()
+      .includes(query.trim().toLowerCase());
+    const matchesCategory = categoryFilter === "All" || line.category === categoryFilter;
+    const matchesStock =
+      stockFilter === "All" ||
+      (stockFilter === "Available" && line.stock >= 20) ||
+      (stockFilter === "Low stock" && line.stock > 0 && line.stock < 20) ||
+      (stockFilter === "Out of stock" && line.stock <= 0);
+    return matchesQuery && matchesCategory && matchesStock;
+  });
+  const loadInventoryHistory = async () => {
+    const report = await getAdminReports();
+    setInventoryMovements(report.inventoryMovements);
+  };
+  useEffect(() => {
+    if (!isInventory) return;
+    void loadInventoryHistory().catch(() => setInventoryMovements([]));
+  }, [isInventory]);
   useEffect(() => {
     setQuery("");
     setCategoryFilter("All");
@@ -4281,7 +4316,6 @@ function ManagementPage({ page }: { page: string }) {
             name: product.name,
             category: product.category,
             price: String(product.price),
-            stock: String(product.stock),
             description: product.description,
             image: product.image,
             productType:
@@ -4297,8 +4331,7 @@ function ManagementPage({ page }: { page: string }) {
             updatedAt: undefined,
             name: "",
             category: "School Supplies",
-            price: "0",
-            stock: "0",
+            price: "",
             description: "",
             image: "/assets/stationery.jpg",
             productType: "simple",
@@ -4314,13 +4347,8 @@ function ManagementPage({ page }: { page: string }) {
       if (!draft.name.trim() || !draft.category.trim()) {
         throw new Error("Enter a product name and category.");
       }
-      if (
-        !Number.isFinite(Number(draft.price)) ||
-        Number(draft.price) < 0 ||
-        (draft.productType === "simple" &&
-          (!Number.isInteger(Number(draft.stock)) || Number(draft.stock) < 0))
-      ) {
-        throw new Error("Enter a valid price and stock quantity.");
+      if (!Number.isFinite(Number(draft.price)) || Number(draft.price) < 0) {
+        throw new Error("Enter a valid price.");
       }
       const input = {
         updatedAt: draft.updatedAt,
@@ -4332,7 +4360,6 @@ function ManagementPage({ page }: { page: string }) {
         attributes: draft.productType === "variable" ? draft.attributes : [],
         variations: draft.productType === "variable" ? draft.variations : [],
         price: Number(draft.price),
-        stock: Number(draft.stock),
         sizes: [],
       };
       if (
@@ -4381,13 +4408,341 @@ function ManagementPage({ page }: { page: string }) {
       setSaving(false);
     }
   };
+  const openInventoryAdjustment = (line: InventoryLine) => {
+    setInventoryTarget(line);
+    setAdjustmentMode("add");
+    setAdjustmentQuantity("");
+  };
+  const saveInventoryAdjustment = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!inventoryTarget) return;
+    const quantity = Number(adjustmentQuantity);
+    if (
+      !Number.isInteger(quantity) ||
+      quantity < 0 ||
+      (adjustmentMode !== "set" && quantity === 0)
+    ) {
+      setFeedback({ message: "Enter a valid whole-number quantity.", tone: "error" });
+      return;
+    }
+    if (adjustmentMode === "remove" && quantity > inventoryTarget.stock) {
+      setFeedback({ message: "Stock cannot go below zero.", tone: "error" });
+      return;
+    }
+    const quantityChange =
+      adjustmentMode === "set"
+        ? quantity - inventoryTarget.stock
+        : adjustmentMode === "add"
+          ? quantity
+          : -quantity;
+    if (!quantityChange) {
+      setFeedback({ message: "The new stock level is unchanged.", tone: "error" });
+      return;
+    }
+    setSaving(true);
+    try {
+      await adjustInventory({
+        productId: inventoryTarget.productId,
+        variationId: inventoryTarget.variationId,
+        quantityChange,
+      });
+      setInventoryTarget(null);
+      setFeedback({ message: "Inventory updated and recorded.", tone: "success" });
+      await Promise.allSettled([refreshProducts(), loadInventoryHistory()]);
+    } catch (reason) {
+      setFeedback({
+        message: reason instanceof Error ? reason.message : "Inventory could not be updated.",
+        tone: "error",
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+  if (isInventory) {
+    const totalUnits = inventoryLines.reduce((sum, line) => sum + line.stock, 0);
+    const lowStockCount = inventoryLines.filter((line) => line.active && line.stock < 20).length;
+    return (
+      <>
+        <SectionTitle
+          title="Inventory management"
+          subtitle="Record stock received, corrections, and variation-level inventory."
+        />
+        {productLoadError && (
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#e4c9c1] bg-[#fff7f4] px-4 py-3">
+            <p className="text-xs text-[#7d4338]">{productLoadError}</p>
+            <Button
+              kind="secondary"
+              loading={loading}
+              onClick={() => void refreshProducts().catch(() => undefined)}
+            >
+              Retry
+            </Button>
+          </div>
+        )}
+        <div className="mb-5 grid gap-3 sm:grid-cols-3">
+          {(
+            [
+              ["Total units", totalUnits, Boxes],
+              ["Stock entries", inventoryLines.length, PackageCheck],
+              ["Low or out", lowStockCount, AlertTriangle],
+            ] as Array<[string, number, LucideIcon]>
+          ).map(([label, value, Icon]) => (
+            <div
+              key={String(label)}
+              className="flex items-center gap-3 rounded-xl border border-[#dce2da] bg-white p-4"
+            >
+              <span className="grid size-10 place-items-center rounded-lg bg-[#edf3ed] text-[#315f49]">
+                <Icon size={18} />
+              </span>
+              <div>
+                <div className="text-lg font-bold text-[#214536]">{String(value)}</div>
+                <div className="text-[10px] font-semibold uppercase tracking-[.08em] text-[#7b867e]">
+                  {String(label)}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="overflow-hidden rounded-xl border border-[#dce1d7] bg-white">
+          <div className="filter-toolbar filter-toolbar-embedded">
+            <label className="filter-search">
+              <span className="sr-only">Search inventory</span>
+              <Search
+                size={15}
+                className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#7c8981]"
+              />
+              <input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Search products or variations"
+                className="filter-control pl-9"
+              />
+            </label>
+            <select
+              value={categoryFilter}
+              onChange={(event) => setCategoryFilter(event.target.value)}
+              className="filter-control px-3"
+              aria-label="Filter inventory by category"
+            >
+              <option value="All">All categories</option>
+              {managementCategories.map((category) => (
+                <option key={category}>{category}</option>
+              ))}
+            </select>
+            <select
+              value={stockFilter}
+              onChange={(event) => setStockFilter(event.target.value)}
+              className="filter-control px-3"
+              aria-label="Filter inventory by stock level"
+            >
+              <option>All</option>
+              <option>Available</option>
+              <option>Low stock</option>
+              <option>Out of stock</option>
+            </select>
+            <ClearFiltersButton
+              disabled={!query && categoryFilter === "All" && stockFilter === "All"}
+              onClick={() => {
+                setQuery("");
+                setCategoryFilter("All");
+                setStockFilter("All");
+              }}
+            />
+          </div>
+          <div className="table-wrap max-h-[520px] overflow-y-auto">
+            <table>
+              <thead>
+                <tr>
+                  <th>Product</th>
+                  <th>Variation</th>
+                  <th>Category</th>
+                  <th>On hand</th>
+                  <th>Status</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {filteredInventoryLines.map((line) => (
+                  <tr key={line.key}>
+                    <td data-label="Product" className="font-semibold">
+                      {line.productName}
+                    </td>
+                    <td data-label="Variation">
+                      {line.variationLabel ?? "Standard"}
+                      {!line.active && (
+                        <span className="ml-2 text-[9px] font-semibold text-[#8a6355]">
+                          Inactive
+                        </span>
+                      )}
+                    </td>
+                    <td data-label="Category">{line.category}</td>
+                    <td data-label="On hand" className="font-bold text-[#214536]">
+                      {line.stock}
+                    </td>
+                    <td data-label="Status">
+                      <Pill tone={line.stock <= 0 ? "gray" : line.stock < 20 ? "amber" : "green"}>
+                        {line.stock <= 0
+                          ? "Out of stock"
+                          : line.stock < 20
+                            ? "Low stock"
+                            : "Available"}
+                      </Pill>
+                    </td>
+                    <td data-label="Actions">
+                      <Button kind="secondary" onClick={() => openInventoryAdjustment(line)}>
+                        Adjust stock
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+                {!filteredInventoryLines.length && (
+                  <tr>
+                    <td colSpan={6} className="py-12 text-center text-xs text-[#69766e]">
+                      No inventory records match these filters.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <section className="mt-5 rounded-xl border border-[#dce1d7] bg-white p-4 sm:p-5">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-sm font-semibold text-[#29483a]">Recent inventory movements</h2>
+            <Button kind="ghost" onClick={() => void loadInventoryHistory()} className="gap-2">
+              <RefreshCw size={14} /> Refresh
+            </Button>
+          </div>
+          <div className="mt-3 divide-y divide-[#e7eae5]">
+            {inventoryMovements.slice(0, 12).map((movement) => (
+              <div
+                key={movement.id}
+                className="flex flex-wrap items-center justify-between gap-2 py-3 text-xs"
+              >
+                <div>
+                  <span className="font-semibold text-[#29483a]">{movement.productName}</span>
+                  {movement.variationLabel && (
+                    <span className="text-[#6f7b74]"> · {movement.variationLabel}</span>
+                  )}
+                  <div className="mt-1 text-[10px] text-[#818a82]">
+                    {movement.reason || movement.type} ·{" "}
+                    {new Date(movement.createdAt).toLocaleString()}
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div
+                    className={`font-bold ${movement.quantityChange > 0 ? "text-[#246344]" : "text-[#914f40]"}`}
+                  >
+                    {movement.quantityChange > 0 ? "+" : ""}
+                    {movement.quantityChange}
+                  </div>
+                  <div className="text-[10px] text-[#7b867e]">{movement.stockAfter} on hand</div>
+                </div>
+              </div>
+            ))}
+            {!inventoryMovements.length && (
+              <p className="py-8 text-center text-xs text-[#748078]">
+                No inventory movements recorded yet.
+              </p>
+            )}
+          </div>
+        </section>
+        {inventoryTarget && (
+          <div
+            className="fixed inset-0 z-[120] grid place-items-center bg-[#0b0d0e]/60 p-4 backdrop-blur-sm"
+            onMouseDown={() => !saving && setInventoryTarget(null)}
+          >
+            <form
+              onSubmit={saveInventoryAdjustment}
+              onMouseDown={(event) => event.stopPropagation()}
+              className="w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl"
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h2 className="text-lg font-semibold text-[#173d2f]">Adjust inventory</h2>
+                  <p className="mt-1 text-xs text-[#6f7b74]">
+                    {inventoryTarget.productName}
+                    {inventoryTarget.variationLabel ? ` · ${inventoryTarget.variationLabel}` : ""}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setInventoryTarget(null)}
+                  className="grid size-10 place-items-center rounded-lg border border-[#d5dcd4]"
+                  aria-label="Close inventory adjustment"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+              <div className="mt-5 grid grid-cols-3 gap-1 rounded-xl bg-[#f1f4ef] p-1">
+                {(
+                  [
+                    ["add", "Add"],
+                    ["remove", "Remove"],
+                    ["set", "Set total"],
+                  ] as const
+                ).map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => {
+                      setAdjustmentMode(value);
+                      setAdjustmentQuantity("");
+                    }}
+                    className={`min-h-10 rounded-lg text-xs font-semibold ${
+                      adjustmentMode === value
+                        ? "bg-white text-[#184d37] shadow-sm"
+                        : "text-[#69766e]"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <div className="mt-4 rounded-xl bg-[#f7f8f4] p-3 text-xs text-[#53645a]">
+                On hand: <strong className="text-[#214536]">{inventoryTarget.stock}</strong>
+              </div>
+              <label className="field mt-4">
+                {adjustmentMode === "set" ? "New total" : "Quantity"}
+                <input
+                  type="number"
+                  min={adjustmentMode === "set" ? 0 : 1}
+                  max={adjustmentMode === "remove" ? inventoryTarget.stock : undefined}
+                  step="1"
+                  value={adjustmentQuantity}
+                  onChange={(event) => setAdjustmentQuantity(event.target.value)}
+                  autoFocus
+                  required
+                />
+              </label>
+              <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                <Button kind="secondary" onClick={() => setInventoryTarget(null)}>
+                  Cancel
+                </Button>
+                <Button type="submit" loading={saving}>
+                  Save adjustment
+                </Button>
+              </div>
+            </form>
+          </div>
+        )}
+        {feedback && (
+          <FeedbackToast
+            message={feedback.message}
+            tone={feedback.tone}
+            onClose={() => setFeedback(null)}
+          />
+        )}
+      </>
+    );
+  }
   return (
     <>
       <SectionTitle
         title={title}
         subtitle={
           isProduct
-            ? "Maintain products, pricing, and availability."
+            ? "Maintain product details, pricing, images, SKUs, and variations."
             : "Monitor stock levels and record adjustments."
         }
         action={
@@ -4505,11 +4860,9 @@ function ManagementPage({ page }: { page: string }) {
                     </label>
                   ))}
                 </div>
-                <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                  <label
-                    className={`field ${draft.productType === "variable" ? "sm:col-span-2" : ""}`}
-                  >
-                    {draft.productType === "simple" ? "Price" : "Starting price"}
+                <div className="mt-4">
+                  <label className="field">
+                    {draft.productType === "simple" ? "Price" : "Default price for new variations"}
                     <input
                       type="number"
                       min="0"
@@ -4519,18 +4872,6 @@ function ManagementPage({ page }: { page: string }) {
                       required
                     />
                   </label>
-                  {draft.productType === "simple" && (
-                    <label className="field">
-                      Stock
-                      <input
-                        type="number"
-                        min="0"
-                        value={draft.stock}
-                        onChange={(event) => setDraft({ ...draft, stock: event.target.value })}
-                        required
-                      />
-                    </label>
-                  )}
                 </div>
               </section>
 
@@ -4539,7 +4880,7 @@ function ManagementPage({ page }: { page: string }) {
                   <VariationEditor
                     attributes={draft.attributes}
                     variations={draft.variations}
-                    basePrice={Number(draft.price)}
+                    basePrice={draft.price === "" ? Number.NaN : Number(draft.price)}
                     onAttributesChange={(attributes) => setDraft({ ...draft, attributes })}
                     onVariationsChange={(variations) => setDraft({ ...draft, variations })}
                   />
@@ -4562,11 +4903,7 @@ function ManagementPage({ page }: { page: string }) {
         </div>
       )}
       <div className="overflow-hidden rounded-lg border border-[#dce1d7] bg-white">
-        <div
-          className={`filter-toolbar filter-toolbar-embedded ${
-            isInventory ? "" : "filter-toolbar-three"
-          }`}
-        >
+        <div className="filter-toolbar filter-toolbar-embedded filter-toolbar-three">
           <label className="filter-search">
             <span className="sr-only">Search products</span>
             <Search
@@ -4591,25 +4928,11 @@ function ManagementPage({ page }: { page: string }) {
               <option key={category}>{category}</option>
             ))}
           </select>
-          {isInventory && (
-            <select
-              value={stockFilter}
-              onChange={(event) => setStockFilter(event.target.value)}
-              className="filter-control px-3"
-              aria-label="Filter products by stock level"
-            >
-              <option>All</option>
-              <option>Available</option>
-              <option>Low stock</option>
-              <option>Out of stock</option>
-            </select>
-          )}
           <ClearFiltersButton
-            disabled={!query && categoryFilter === "All" && stockFilter === "All"}
+            disabled={!query && categoryFilter === "All"}
             onClick={() => {
               setQuery("");
               setCategoryFilter("All");
-              setStockFilter("All");
             }}
           />
         </div>
@@ -4621,8 +4944,6 @@ function ManagementPage({ page }: { page: string }) {
                 <th>Category</th>
                 <th>Type</th>
                 <th>Price</th>
-                <th>On hand</th>
-                <th>Status</th>
                 <th>Updated</th>
                 <th />
               </tr>
@@ -4648,21 +4969,13 @@ function ManagementPage({ page }: { page: string }) {
                       )}
                     </td>
                     <td data-label="Category">{item.category}</td>
-                    <td data-label="Type" className="capitalize">
-                      {item.productType ?? "simple"}
+                    <td data-label="Type">
+                      {item.productType === "variable" ? "With options" : "Simple"}
                     </td>
                     <td data-label="Price">{priceRange}</td>
-                    <td data-label="On hand">{item.stock} units</td>
-                    <td data-label="Status">
-                      <Pill tone={item.stock <= 0 ? "gray" : item.stock < 20 ? "amber" : "green"}>
-                        {item.stock <= 0
-                          ? "Out of stock"
-                          : item.stock < 20
-                            ? "Low stock"
-                            : "Active"}
-                      </Pill>
+                    <td data-label="Updated">
+                      {item.updatedAt ? new Date(item.updatedAt).toLocaleDateString() : "—"}
                     </td>
-                    <td data-label="Updated">Current</td>
                     <td data-label="Actions">
                       <div className="flex gap-3">
                         <button
@@ -4694,7 +5007,7 @@ function ManagementPage({ page }: { page: string }) {
               })}
               {!filteredManagementItems.length && (
                 <tr>
-                  <td colSpan={8} className="py-12 text-center text-xs text-[#69766e]">
+                  <td colSpan={6} className="py-12 text-center text-xs text-[#69766e]">
                     No records match your search and filters.
                   </td>
                 </tr>
@@ -5010,7 +5323,12 @@ export default function App() {
     if (page === "Dashboard") return <Dashboard role={role} setPage={navigate} />;
     if (role === "staff" && page === "POS terminal") return <PosTerminal />;
     if (role === "staff" && page === "Order management") return <OrderManagementPage />;
-    if (role === "admin" && page === "Reports & transactions") return <AdminReportsPage />;
+    if (
+      role === "admin" &&
+      (page === "Sales & transactions" || page === "Reports & transactions")
+    ) {
+      return <AdminReportsPage />;
+    }
     if (role === "admin" && page === "User management") {
       return <UserManagementPage currentUserId={user.id} />;
     }

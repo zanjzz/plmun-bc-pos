@@ -41,7 +41,9 @@ test("keeps edits when regenerating the same combination", () => {
     { price: 250, stock: 0 },
   );
   assert.equal(generated[0], existing);
+  assert.equal(generated[0].stock, 12);
   assert.equal(generated[1].price, 250);
+  assert.equal(generated[1].stock, 0);
 });
 
 test("disables out-of-stock options in the current combination", () => {

@@ -140,7 +140,7 @@ export async function getProducts() {
   return (await apiRequest<{ products: Product[] }>("/products")).products;
 }
 
-export async function createProduct(product: Omit<Product, "id">) {
+export async function createProduct(product: Omit<Product, "id" | "stock">) {
   const created = (
     await apiRequest<{ product: Product }>(
       "/products",
@@ -167,7 +167,7 @@ export async function uploadProductImage(file: File) {
   ).url;
 }
 
-export async function updateProduct(id: number, updates: Partial<Product>) {
+export async function updateProduct(id: number, updates: Partial<Omit<Product, "id" | "stock">>) {
   const updated = (
     await apiRequest<{ product: Product }>(
       `/products/${id}`,
@@ -182,4 +182,18 @@ export async function updateProduct(id: number, updates: Partial<Product>) {
 export async function deleteProduct(id: number) {
   await apiRequest(`/products/${id}`, { method: "DELETE" }, true);
   requestNotificationRefresh();
+}
+
+export async function adjustInventory(input: {
+  productId: number;
+  variationId: number | null;
+  quantityChange: number;
+}) {
+  const result = await apiRequest<{ product: Product; stockAfter: number }>(
+    "/inventory/adjust",
+    { method: "POST", body: JSON.stringify(input) },
+    true,
+  );
+  requestNotificationRefresh();
+  return result;
 }
