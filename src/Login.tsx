@@ -256,7 +256,7 @@ export default function Login({
                   <span className="h-px flex-1 bg-[#dde1d8]" />
                 </div>
                 <div className="grid gap-2 sm:grid-cols-3">
-                  {(Object.keys(roleDetails) as Role[]).map((role) => {
+                  {(Object.keys(roleDetails) as Role[]).filter((role) => role === "student").map((role) => {
                     const detail = roleDetails[role];
                     const Icon = detail.icon;
                     return (
