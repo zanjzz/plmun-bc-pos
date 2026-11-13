@@ -1002,7 +1002,7 @@ app.post(`${prefix}/products`, async (c) => {
       name: String(input.name ?? "").trim(),
       category: String(input.category ?? "School Supplies"),
       price: Number(input.price ?? 0),
-      stock: 0,
+      stock: Number(input.stock ?? 0),
       image: String(input.image ?? "/assets/stationery.jpg"),
       description: String(input.description ?? ""),
       sizes: Array.isArray(input.sizes) ? input.sizes : [],

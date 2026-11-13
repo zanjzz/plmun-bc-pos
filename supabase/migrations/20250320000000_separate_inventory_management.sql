@@ -42,7 +42,7 @@ begin
     coalesce(item -> 'attributes', '{}'::jsonb),
     coalesce(item ->> 'sku', ''),
     (item ->> 'price')::numeric,
-    0,
+    coalesce((item ->> 'stock')::integer, 0),
     coalesce((item ->> 'active')::boolean, true),
     nullif(item ->> 'image', '')
   from jsonb_array_elements(p_variations) item
