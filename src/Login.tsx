@@ -257,28 +257,28 @@ export default function Login({
                 </div>
                 <div className="grid gap-2 sm:grid-cols-3">
                   {(Object.keys(roleDetails) as Role[]).map((role) => {
-                    const detail = roleDetails[role];
-                    const Icon = detail.icon;
-                    return (
-                      <button
-                        key={role}
-                        type="button"
-                        onClick={() => selectAccount(role)}
-                        className="group rounded-lg border border-[#dce1d7] bg-white p-3 text-left transition-all duration-300 hover:-translate-y-0.5 hover:border-[#769180] hover:shadow-md"
-                      >
-                        <Icon
-                          size={17}
-                          className="mb-2 text-[#668071] transition group-hover:text-[#184d37]"
-                        />
-                        <div className="text-[11px] font-semibold text-[#244838]">
-                          {detail.label}
-                        </div>
-                        <div className="mt-1 text-[9px] leading-4 text-[#899189]">
-                          {detail.description}
-                        </div>
-                      </button>
-                    );
-                  })}
+                      const detail = roleDetails[role];
+                      const Icon = detail.icon;
+                      return (
+                        <button
+                          key={role}
+                          type="button"
+                          onClick={() => selectAccount(role)}
+                          className="group rounded-lg border border-[#dce1d7] bg-white p-3 text-left transition-all duration-300 hover:-translate-y-0.5 hover:border-[#769180] hover:shadow-md"
+                        >
+                          <Icon
+                            size={17}
+                            className="mb-2 text-[#668071] transition group-hover:text-[#184d37]"
+                          />
+                          <div className="text-[11px] font-semibold text-[#244838]">
+                            {detail.label}
+                          </div>
+                          <div className="mt-1 text-[9px] leading-4 text-[#899189]">
+                            {detail.description}
+                          </div>
+                        </button>
+                      );
+                    })}
                 </div>
                 <p className="mt-4 text-center text-[10px] text-[#929991]">
                   Choose a role, then select “Sign in.”

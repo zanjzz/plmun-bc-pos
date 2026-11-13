@@ -586,9 +586,17 @@ function NotificationCenter({
                     >
                       {/* Delete button background (revealed on swipe) */}
                       {canDismiss && (
-                        <div className="absolute inset-y-0 right-0 flex w-20 items-center justify-center bg-[#a13f32] sm:hidden">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void removeNotification(notification);
+                            setSwipedId(null);
+                          }}
+                          className="absolute inset-y-0 right-0 flex w-20 items-center justify-center bg-[#a13f32] sm:hidden"
+                          aria-label={`Delete ${notification.title}`}
+                        >
                           <Trash2 size={20} className="text-white" />
-                        </div>
+                        </button>
                       )}
                       
                       {/* Swipeable content */}
@@ -628,18 +636,11 @@ function NotificationCenter({
                           document.addEventListener("touchmove", onTouchMove);
                           document.addEventListener("touchend", onTouchEnd);
                         }}
-                        onClick={() => {
-                          if (isSwiped && canDismiss) {
-                            void removeNotification(notification);
-                            setSwipedId(null);
-                          }
-                        }}
                       >
                         <button
                           type="button"
                           onClick={(e) => {
                             if (isSwiped) {
-                              e.stopPropagation();
                               return;
                             }
                             readNotification(notification);
